@@ -1,0 +1,26 @@
+modLoader = "javafml"
+loaderVersion = "[47,)"
+license = "MIT"
+
+[[mods]]
+modId = "agent"
+version = "${file.jarVersion}"
+displayName = "Minecraft Agent"
+description = '''
+AI agent that controls a fake player via natural language commands.
+Powered by Claude Agent SDK.
+'''
+
+[[dependencies.agent]]
+modId = "forge"
+mandatory = true
+versionRange = "[47,)"
+ordering = "NONE"
+side = "BOTH"
+
+[[dependencies.agent]]
+modId = "minecraft"
+mandatory = true
+versionRange = "[1.20.1,1.21)"
+ordering = "NONE"
+side = "BOTH"

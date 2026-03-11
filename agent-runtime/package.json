@@ -1,0 +1,25 @@
+{
+  "name": "agent-runtime",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx src/index.ts",
+    "build": "tsc",
+    "test:bridge": "tsx tests/test-bridge.ts",
+    "test:mcp": "tsx tests/test-mcp.ts",
+    "test:sdk": "tsx tests/test-sdk.ts",
+    "test:mock": "tsx tests/test-mock-integration.ts",
+    "test:mock-bridge": "tsx tests/mock-bridge.ts",
+    "test:all": "tsx tests/test-bridge.ts && tsx tests/test-mcp.ts && tsx tests/test-sdk.ts"
+  },
+  "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "latest",
+    "@modelcontextprotocol/sdk": "latest",
+    "zod": "^4.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.4",
+    "tsx": "^4.0",
+    "@types/node": "^20"
+  }
+}

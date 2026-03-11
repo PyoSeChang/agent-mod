@@ -1,0 +1,65 @@
+plugins {
+    id 'eclipse'
+    id 'idea'
+    id 'net.minecraftforge.gradle' version '[6.0,6.2)'
+}
+
+version = '0.1.0'
+group = 'com.pyosechang.agent'
+
+java.toolchain.languageVersion = JavaLanguageVersion.of(17)
+
+compileJava {
+    options.encoding = 'UTF-8'
+}
+
+minecraft {
+    mappings channel: 'official', version: '1.20.1'
+
+    copyIdeResources = true
+
+    runs {
+        configureEach {
+            workingDirectory project.file('run')
+            property 'forge.logging.markers', 'REGISTRIES'
+            property 'forge.logging.console.level', 'debug'
+
+            mods {
+                agent {
+                    source sourceSets.main
+                }
+            }
+        }
+
+        client {
+            property 'forge.enabledGameTestNamespaces', 'agent'
+        }
+
+        server {
+            property 'forge.enabledGameTestNamespaces', 'agent'
+            args '--nogui'
+        }
+    }
+}
+
+dependencies {
+    minecraft 'net.minecraftforge:forge:1.20.1-47.2.0'
+}
+
+jar {
+    manifest {
+        attributes([
+            'Specification-Title'   : 'agent',
+            'Specification-Vendor'  : 'pyosechang',
+            'Specification-Version' : '1',
+            'Implementation-Title'  : project.name,
+            'Implementation-Version': project.jar.archiveVersion,
+            'Implementation-Vendor' : 'pyosechang',
+        ])
+    }
+    finalizedBy 'reobfJar'
+}
+
+reobf {
+    jar {}
+}

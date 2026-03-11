@@ -1,0 +1,38 @@
+# Gradle
+.gradle/
+build/
+
+# Runtime
+**/run/
+
+# IDE
+.idea/
+*.iml
+*.ipr
+*.iws
+.settings/
+.classpath
+.project
+bin/
+out/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Screenshots & logs
+*.png
+*.log
+
+# Claude
+.claude/
+
+# Obsidian
+docs/.obsidian/
+
+# Gradle wrapper jar (use wrapper task to regenerate)
+gradle/wrapper/gradle-wrapper.jar
+
+# Node
+agent-runtime/node_modules/
+agent-runtime/dist/
