@@ -42,6 +42,21 @@ server.tool("mine_block", "Mine a block at coordinates",
   })
 );
 
+// Area mining
+server.tool("mine_area", "Mine all blocks in a rectangular area. Agent walks to each block and mines it automatically.",
+  {
+    x1: z.number().describe("Start X"),
+    y1: z.number().describe("Start Y"),
+    z1: z.number().describe("Start Z"),
+    x2: z.number().describe("End X"),
+    y2: z.number().describe("End Y"),
+    z2: z.number().describe("End Z"),
+  },
+  async ({ x1, y1, z1, x2, y2, z2 }) => ({
+    content: [{ type: "text", text: await bridgeFetch("/action", "POST", { action: "mine_area", x1, y1, z1, x2, y2, z2 }) }],
+  })
+);
+
 // Placing
 server.tool("place_block", "Place a block at coordinates",
   { x: z.number(), y: z.number(), z: z.number(), block: z.string() },
@@ -51,13 +66,6 @@ server.tool("place_block", "Place a block at coordinates",
 );
 
 // Item management
-server.tool("pickup_items", "Pick up nearby items",
-  { radius: z.number().optional().default(5) },
-  async ({ radius }) => ({
-    content: [{ type: "text", text: await bridgeFetch("/action", "POST", { action: "pickup_items", radius }) }],
-  })
-);
-
 server.tool("drop_item", "Drop an item from inventory",
   { item: z.string(), count: z.number().optional().default(1) },
   async ({ item, count }) => ({
@@ -88,14 +96,14 @@ server.tool("interact", "Interact with an entity",
 );
 
 // Container operations
-server.tool("open_container", "Open a container (chest, furnace, etc.) at coordinates",
+server.tool("open_container", "Open a container (chest, furnace, etc.) and return all slot contents. Slots include both container and agent inventory.",
   { x: z.number(), y: z.number(), z: z.number() },
   async ({ x, y, z: zCoord }) => ({
     content: [{ type: "text", text: await bridgeFetch("/action", "POST", { action: "open_container", x, y, z: zCoord }) }],
   })
 );
 
-server.tool("click_slot", "Click a slot in the open container",
+server.tool("click_slot", "Click a slot in the open container. Returns before/after state of the slot. Use with execute_sequence for bulk operations.",
   { slot: z.number(), action: z.enum(["pickup", "quick_move", "throw"]).optional().default("pickup") },
   async ({ slot, action }) => ({
     content: [{ type: "text", text: await bridgeFetch("/action", "POST", { action: "click_slot", slot, click_action: action }) }],
@@ -108,10 +116,13 @@ server.tool("close_container", "Close the currently open container", {},
   })
 );
 
-server.tool("craft", "Look up a crafting recipe",
-  { recipe: z.string().describe("Recipe ID like 'minecraft:iron_pickaxe'") },
-  async ({ recipe }) => ({
-    content: [{ type: "text", text: await bridgeFetch("/action", "POST", { action: "craft", recipe }) }],
+server.tool("craft", "Craft an item using a recipe. Checks inventory for ingredients, consumes them, and produces output. Requires crafting table nearby for 3x3 recipes.",
+  {
+    recipe: z.string().describe("Recipe ID like 'minecraft:iron_pickaxe'"),
+    count: z.number().optional().default(1).describe("How many times to craft (default 1)"),
+  },
+  async ({ recipe, count }) => ({
+    content: [{ type: "text", text: await bridgeFetch("/action", "POST", { action: "craft", recipe, count }) }],
   })
 );
 
@@ -122,32 +133,108 @@ server.tool("smelt", "Look up a smelting recipe for an item",
   })
 );
 
-// Memory tools
-server.tool("remember_location", "Remember a named location",
-  { name: z.string(), x: z.number(), y: z.number(), z: z.number(), note: z.string().optional() },
-  async (params) => ({
-    content: [{ type: "text", text: await bridgeFetch("/action", "POST", { action: "remember_location", ...params }) }],
+// Block interaction (right-click)
+server.tool("use_item_on", "Use held item on a block face (right-click). Works for: hoe on dirt, seeds on farmland, doors, levers, buckets, mod blocks.",
+  { x: z.number(), y: z.number(), z: z.number(), face: z.enum(["up", "down", "north", "south", "east", "west"]).optional().default("up") },
+  async ({ x, y, z: zCoord, face }) => ({
+    content: [{ type: "text", text: await bridgeFetch("/action", "POST", { action: "use_item_on", x, y, z: zCoord, face }) }],
   })
 );
 
-server.tool("remember_facility", "Remember a facility (furnace, storage, etc.)",
-  { name: z.string(), x: z.number(), y: z.number(), z: z.number(), type: z.string(), note: z.string().optional() },
-  async (params) => ({
-    content: [{ type: "text", text: await bridgeFetch("/action", "POST", { action: "remember_facility", ...params }) }],
+// Area use-item-on (right-click on 2D area)
+server.tool("use_item_on_area", "Use held item on every block in a 2D area (fixed Y). Agent walks in serpentine pattern. Great for hoeing farmland or planting seeds.",
+  {
+    x1: z.number().describe("Start X"),
+    z1: z.number().describe("Start Z"),
+    x2: z.number().describe("End X"),
+    z2: z.number().describe("End Z"),
+    y: z.number().describe("Y level of blocks to interact with"),
+    face: z.enum(["up", "down", "north", "south", "east", "west"]).optional().default("up"),
+  },
+  async ({ x1, z1, x2, z2, y, face }) => ({
+    content: [{ type: "text", text: await bridgeFetch("/action", "POST", { action: "use_item_on_area", x1, z1, x2, z2, y, face }) }],
   })
 );
 
-server.tool("remember_preference", "Remember a user preference",
-  { key: z.string(), value: z.string() },
-  async (params) => ({
-    content: [{ type: "text", text: await bridgeFetch("/action", "POST", { action: "remember_preference", ...params }) }],
+// Sequence execution
+server.tool("execute_sequence", "Execute a sequence of actions one after another in a single call. Sync actions run instantly, async actions (move_to, mine_block, mine_area, use_item_on_area) are ticked to completion. Stops on first failure.",
+  {
+    steps: z.array(z.record(z.string(), z.any())).describe("Array of action objects. Each must have 'action' field plus that action's parameters. Example: [{action:'equip',item:'wooden_hoe',slot:'mainhand'},{action:'use_item_on_area',x1:10,z1:20,x2:15,z2:25,y:63,face:'up'}]"),
+  },
+  async ({ steps }) => ({
+    content: [{ type: "text", text: await bridgeFetch("/action", "POST", { action: "execute_sequence", steps }) }],
   })
 );
 
-server.tool("recall", "Search agent memory for information",
-  { query: z.string() },
-  async ({ query }) => ({
-    content: [{ type: "text", text: await bridgeFetch("/action", "POST", { action: "recall", query }) }],
+// --- Memory tools ---
+
+server.tool("remember", "Save a memory. The agent remembers locations, facilities, resources, procedures, preferences. If no location is provided, current position is used.",
+  {
+    title: z.string().describe("Short title (1 line)"),
+    description: z.string().describe("Keywords-rich description for matching"),
+    content: z.string().describe("Detailed information"),
+    category: z.enum(["storage", "facility", "area", "event", "preference", "skill"]),
+    tags: z.array(z.string()).optional().default([]),
+    location: z.object({
+      type: z.enum(["point", "area"]),
+      x: z.number().optional(),
+      y: z.number().optional(),
+      z: z.number().optional(),
+      radius: z.number().optional(),
+      x1: z.number().optional(),
+      z1: z.number().optional(),
+      x2: z.number().optional(),
+      z2: z.number().optional(),
+    }).optional(),
+  },
+  async ({ title, description, content, category, tags, location }) => ({
+    content: [{ type: "text", text: await bridgeFetch("/memory/create", "POST", { title, description, content, category, tags, location }) }],
+  })
+);
+
+server.tool("update_memory", "Update an existing memory entry (partial update)",
+  {
+    id: z.string().describe("Memory ID like 'm001'"),
+    title: z.string().optional(),
+    description: z.string().optional(),
+    content: z.string().optional(),
+    category: z.enum(["storage", "facility", "area", "event", "preference", "skill"]).optional(),
+    tags: z.array(z.string()).optional(),
+  },
+  async ({ id, title, description, content, category, tags }) => {
+    const fields: Record<string, unknown> = { id };
+    if (title !== undefined) fields.title = title;
+    if (description !== undefined) fields.description = description;
+    if (content !== undefined) fields.content = content;
+    if (category !== undefined) fields.category = category;
+    if (tags !== undefined) fields.tags = tags;
+    return {
+      content: [{ type: "text", text: await bridgeFetch("/memory/update", "POST", fields) }],
+    };
+  }
+);
+
+server.tool("forget", "Delete a memory entry",
+  { id: z.string().describe("Memory ID like 'm001'") },
+  async ({ id }) => ({
+    content: [{ type: "text", text: await bridgeFetch("/memory/delete", "POST", { id }) }],
+  })
+);
+
+server.tool("recall", "Retrieve full content of a memory entry. Use when you see a relevant title in the title_index but need the details.",
+  { id: z.string().describe("Memory ID like 'm001'") },
+  async ({ id }) => ({
+    content: [{ type: "text", text: await bridgeFetch("/memory/get", "POST", { id }) }],
+  })
+);
+
+server.tool("search_memory", "Search memories by keyword and/or category",
+  {
+    query: z.string().optional().default("").describe("Keyword to search in title, description, tags"),
+    category: z.enum(["storage", "facility", "area", "event", "preference", "skill"]).optional(),
+  },
+  async ({ query, category }) => ({
+    content: [{ type: "text", text: await bridgeFetch("/memory/search", "POST", { query, category }) }],
   })
 );
 

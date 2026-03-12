@@ -2,6 +2,8 @@ package com.pyosechang.agent.core;
 
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
+import com.pyosechang.agent.core.memory.MemoryEntry;
+import com.pyosechang.agent.core.memory.MemoryManager;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.entity.Entity;
@@ -13,6 +15,7 @@ import net.minecraftforge.registries.ForgeRegistries;
 
 import java.util.Comparator;
 import java.util.List;
+import java.util.Map;
 
 public class ObservationBuilder {
 
@@ -54,10 +57,15 @@ public class ObservationBuilder {
         }
         obs.add("inventory", inventory);
 
-        // Phase 2: Nearby blocks and entities (requires level)
+        // Nearby blocks and entities (requires level)
         if (level != null) {
             obs.add("nearby_blocks", buildNearbyBlocks(agent, level));
             obs.add("nearby_entities", buildNearbyEntities(agent, level));
+        }
+
+        // Memory system
+        if (MemoryManager.getInstance().size() > 0) {
+            obs.add("memories", buildMemories(agent));
         }
 
         return obs;
@@ -149,5 +157,32 @@ public class ObservationBuilder {
         }
 
         return entities;
+    }
+
+    /**
+     * Build memories section with title_index (distance-sorted) and auto_loaded (content included).
+     */
+    private static JsonObject buildMemories(FakePlayer agent) {
+        JsonObject memories = new JsonObject();
+        double ax = agent.getX(), ay = agent.getY(), az = agent.getZ();
+        MemoryManager mm = MemoryManager.getInstance();
+
+        // Title index: all entries sorted by distance
+        JsonArray titleIndex = new JsonArray();
+        List<Map.Entry<MemoryEntry, Double>> indexed = mm.getAllForTitleIndex(ax, ay, az);
+        for (Map.Entry<MemoryEntry, Double> pair : indexed) {
+            titleIndex.add(mm.entryToSummaryJson(pair.getKey(), pair.getValue()));
+        }
+        memories.add("title_index", titleIndex);
+
+        // Auto-loaded: entries with full content based on category rules
+        JsonArray autoLoaded = new JsonArray();
+        List<MemoryEntry> loaded = mm.getAutoLoadContent(ax, ay, az);
+        for (MemoryEntry e : loaded) {
+            autoLoaded.add(mm.entryToAutoLoadJson(e));
+        }
+        memories.add("auto_loaded", autoLoaded);
+
+        return memories;
     }
 }
