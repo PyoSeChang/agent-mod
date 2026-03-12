@@ -1,6 +1,7 @@
 package com.pyosechang.agent.core.action;
 
 import com.google.gson.JsonObject;
+import com.pyosechang.agent.core.AgentAnimation;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.LivingEntity;
@@ -45,6 +46,10 @@ public class AttackAction implements Action {
         if (target instanceof LivingEntity living) {
             healthBefore = living.getHealth();
         }
+
+        // Look at entity and swing arm
+        AgentAnimation.lookAt(agent, target.getX(), target.getY() + target.getEyeHeight() * 0.5, target.getZ());
+        AgentAnimation.swingArm(agent);
 
         agent.attack(target);
 

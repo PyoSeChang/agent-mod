@@ -104,4 +104,12 @@ public class PathFollower {
     public int getCurrentIndex() {
         return currentIndex;
     }
+
+    /**
+     * @return the current target waypoint, or null if not active
+     */
+    public BlockPos getCurrentTarget() {
+        if (!active || currentIndex >= path.size()) return null;
+        return path.get(currentIndex);
+    }
 }

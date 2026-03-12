@@ -51,14 +51,10 @@ public class EquipAction implements Action {
             return result;
         }
 
-        // Take one item from inventory and equip it
+        // Take full stack from inventory and equip it
         ItemStack invStack = agent.getInventory().getItem(invSlot);
         ItemStack equipStack = invStack.copy();
-        equipStack.setCount(1);
-        invStack.shrink(1);
-        if (invStack.isEmpty()) {
-            agent.getInventory().setItem(invSlot, ItemStack.EMPTY);
-        }
+        agent.getInventory().setItem(invSlot, ItemStack.EMPTY);
 
         // Swap: put currently equipped item back into inventory
         ItemStack currentlyEquipped = agent.getItemBySlot(equipSlot);

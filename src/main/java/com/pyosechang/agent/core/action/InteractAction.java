@@ -1,6 +1,7 @@
 package com.pyosechang.agent.core.action;
 
 import com.google.gson.JsonObject;
+import com.pyosechang.agent.core.AgentAnimation;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResult;
@@ -40,6 +41,9 @@ public class InteractAction implements Action {
             result.addProperty("error", "Entity too far away (distance: " + String.format("%.1f", distance) + ")");
             return result;
         }
+
+        // Look at entity
+        AgentAnimation.lookAt(agent, target.getX(), target.getY() + target.getEyeHeight() * 0.5, target.getZ());
 
         InteractionResult interactionResult = agent.interactOn(target, InteractionHand.MAIN_HAND);
 
