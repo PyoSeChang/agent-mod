@@ -15,12 +15,15 @@ import java.io.BufferedReader;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
+import java.util.UUID;
 
 public class RuntimeManager {
     private static final RuntimeManager INSTANCE = new RuntimeManager();
     private static final Logger LOGGER = LogUtils.getLogger();
     private Process process;
     private AgentHttpServer httpServer;
+    private String sessionId;
+    private boolean hasLaunched = false;
 
     public static RuntimeManager getInstance() { return INSTANCE; }
 
@@ -41,8 +44,6 @@ public class RuntimeManager {
         // Resolve agent-runtime path relative to game dir
         // In dev: gameDir = agent-mod/run/, so ../agent-runtime = agent-mod/agent-runtime
         Path runtimePath = FMLPaths.GAMEDIR.get().resolve("../agent-runtime").normalize();
-        Path worldPath = FMLPaths.GAMEDIR.get().resolve("saves");
-
         // Use node + compiled JS to avoid tsx cold start overhead
         String osName = System.getProperty("os.name", "").toLowerCase();
         String nodeCmd = osName.contains("win") ? "node.exe" : "node";
@@ -55,7 +56,13 @@ public class RuntimeManager {
                 pb.directory(runtimePath.toFile());
                 pb.environment().put("AGENT_BRIDGE_PORT", String.valueOf(bridgePort));
                 pb.environment().put("AGENT_MESSAGE", message);
-                pb.environment().put("AGENT_WORLD_PATH", worldPath.toString());
+                // Session continuity: same sessionId across commands
+                if (sessionId == null) {
+                    sessionId = UUID.randomUUID().toString();
+                }
+                pb.environment().put("AGENT_SESSION_ID", sessionId);
+                pb.environment().put("AGENT_IS_RESUME", hasLaunched ? "true" : "false");
+                hasLaunched = true;
                 // Remove CLAUDECODE env var to allow nested Claude Code launch
                 pb.environment().remove("CLAUDECODE");
                 pb.redirectErrorStream(true);
@@ -101,39 +108,50 @@ public class RuntimeManager {
             JsonObject json = JsonParser.parseString(line).getAsJsonObject();
             String type = json.has("type") ? json.get("type").getAsString() : "";
 
-            MutableComponent msg = switch (type) {
+            switch (type) {
                 case "thought" -> {
                     String text = json.get("text").getAsString();
-                    // Truncate long thoughts for chat
-                    if (text.length() > 300) text = text.substring(0, 297) + "...";
-                    yield Component.literal("[Agent] " + text).withStyle(ChatFormatting.GRAY);
+                    // Split by literal \n (JSON escaped) and real newlines
+                    String[] lines = text.split("\\\\n|\n");
+                    int maxLines = 20;
+                    int lineCount = Math.min(lines.length, maxLines);
+                    for (int i = 0; i < lineCount; i++) {
+                        String line2 = lines[i].trim();
+                        if (line2.isEmpty()) continue;
+                        String prefix = (i == 0) ? "[Agent] " : "  ";
+                        sendChatLine(source, Component.literal(prefix + line2).withStyle(ChatFormatting.GRAY));
+                    }
+                    if (lines.length > maxLines) {
+                        sendChatLine(source, Component.literal("  ...(" + (lines.length - maxLines) + " more lines)").withStyle(ChatFormatting.GRAY));
+                    }
                 }
                 case "tool_call" -> {
                     String name = json.get("name").getAsString();
-                    // Strip MCP prefix for readability
                     name = name.replace("mcp__agent-bridge__", "");
-                    yield Component.literal("[Agent] > " + name).withStyle(ChatFormatting.AQUA);
+                    sendChatLine(source, Component.literal("[Agent] > " + name).withStyle(ChatFormatting.AQUA));
                 }
                 case "result" -> {
                     int turns = json.has("turns") ? json.get("turns").getAsInt() : 0;
-                    yield Component.literal(String.format("[Agent] Done (%d turns)", turns))
-                        .withStyle(ChatFormatting.GREEN);
+                    sendChatLine(source, Component.literal(String.format("[Agent] Done (%d turns)", turns))
+                        .withStyle(ChatFormatting.GREEN));
                 }
                 case "error" -> {
                     String err = json.has("message") ? json.get("message").getAsString() : "unknown";
-                    yield Component.literal("[Agent] Error: " + err).withStyle(ChatFormatting.RED);
+                    sendChatLine(source, Component.literal("[Agent] Error: " + err).withStyle(ChatFormatting.RED));
                 }
-                default -> null;
+                default -> {}
             };
-
-            if (msg != null && source.getServer() != null) {
-                final MutableComponent finalMsg = msg;
-                source.getServer().execute(() -> {
-                    source.sendSuccess(() -> finalMsg, false);
-                });
-            }
         } catch (Exception ignored) {
             // Not JSON — ignore
+        }
+    }
+
+    private void sendChatLine(CommandSourceStack source, MutableComponent msg) {
+        if (source.getServer() != null) {
+            final MutableComponent finalMsg = msg;
+            source.getServer().execute(() -> {
+                source.sendSuccess(() -> finalMsg, false);
+            });
         }
     }
 
@@ -143,5 +161,12 @@ public class RuntimeManager {
             LOGGER.info("Agent runtime forcibly stopped");
             process = null;
         }
+    }
+
+    /** Reset session state (called on server stop). Next launch starts a fresh session. */
+    public void resetSession() {
+        sessionId = null;
+        hasLaunched = false;
+        LOGGER.info("Agent session reset");
     }
 }

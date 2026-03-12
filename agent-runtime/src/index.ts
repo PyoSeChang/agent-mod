@@ -1,9 +1,6 @@
 import { query } from "@anthropic-ai/claude-agent-sdk";
 import { SYSTEM_PROMPT } from "./prompt.js";
-import { loadMemory, formatMemoryForPrompt } from "./memory/loader.js";
-import { addTaskHistory } from "./memory/tools.js";
 import { checkIntervention, sendLog } from "./intervention.js";
-import { TaskTracker } from "./task-summary.js";
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
 
@@ -11,30 +8,22 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 
 const bridgePort = process.env.AGENT_BRIDGE_PORT!;
 const message = process.env.AGENT_MESSAGE!;
-const worldPath = process.env.AGENT_WORLD_PATH;
+const sessionId = process.env.AGENT_SESSION_ID!;
+const isResume = process.env.AGENT_IS_RESUME === "true";
 
 if (!bridgePort || !message) {
   console.error("Missing required env vars: AGENT_BRIDGE_PORT, AGENT_MESSAGE");
   process.exit(1);
 }
 
+if (!sessionId) {
+  console.error("Missing required env var: AGENT_SESSION_ID");
+  process.exit(1);
+}
+
 const bridgeUrl = `http://localhost:${bridgePort}`;
 
 async function main() {
-  // Load memory if world path available
-  let memoryPrompt = "";
-  if (worldPath) {
-    try {
-      const memory = await loadMemory(worldPath);
-      memoryPrompt = formatMemoryForPrompt(memory);
-    } catch (e) {
-      console.error("Failed to load memory:", e);
-    }
-  }
-
-  const fullPrompt = `${SYSTEM_PROMPT}${memoryPrompt}\n\n[Command]\n${message}`;
-  const tracker = new TaskTracker(message);
-
   // Determine MCP server script path
   // __dirname is src/ (tsx) or dist/ (node) — compiled .js always in dist/
   const distDir = __dirname.endsWith("src")
@@ -42,30 +31,44 @@ async function main() {
     : __dirname;
   const mcpServerPath = join(distDir, "mcp-server.js");
 
-  await sendLog("thought", `Received command: ${message}`);
+  await sendLog("thought", `Received command: ${message} (session: ${sessionId}, resume: ${isResume})`);
+
+  // First command: full system prompt + sessionId
+  // Subsequent commands: resume previous session + just the new command
+  const prompt = isResume
+    ? `[Command]\n${message}`
+    : `${SYSTEM_PROMPT}\n\n[Command]\n${message}`;
+
+  const queryOptions: Record<string, unknown> = {
+    permissionMode: "bypassPermissions",
+    allowDangerouslySkipPermissions: true,
+    maxTurns: 50,
+    tools: [],  // no built-in tools, only MCP
+    env: { ...process.env, CLAUDECODE: undefined },  // allow nested launch
+    mcpServers: {
+      "agent-bridge": {
+        command: "node",
+        args: [mcpServerPath],
+        env: {
+          AGENT_BRIDGE_URL: bridgeUrl,
+        },
+      },
+    },
+  };
+
+  // Session continuity: resume previous conversation or start new with fixed sessionId
+  if (isResume) {
+    queryOptions.resume = sessionId;
+  } else {
+    queryOptions.sessionId = sessionId;
+  }
 
   let totalTurns = 0;
 
   try {
     for await (const msg of query({
-      prompt: fullPrompt,
-      options: {
-        permissionMode: "bypassPermissions",
-        allowDangerouslySkipPermissions: true,
-        maxTurns: 20,
-        tools: [],  // no built-in tools, only MCP
-        env: { ...process.env, CLAUDECODE: undefined },  // allow nested launch
-        mcpServers: {
-          "agent-bridge": {
-            command: "node",
-            args: [mcpServerPath],
-            env: {
-              AGENT_BRIDGE_URL: bridgeUrl,
-              AGENT_WORLD_PATH: worldPath || "",
-            },
-          },
-        },
-      },
+      prompt,
+      options: queryOptions as Parameters<typeof query>[0]["options"],
     })) {
       // Check for player intervention each turn
       const intervention = await checkIntervention();
@@ -81,7 +84,6 @@ async function main() {
           }
           if ("name" in block && block.name) {
             await sendLog("action", `${block.name}(${JSON.stringify(block.input || {})})`);
-            tracker.addAction(block.name, "pending");
             console.log(JSON.stringify({ type: "tool_call", name: block.name, input: block.input }));
           }
         }
@@ -104,15 +106,6 @@ async function main() {
     console.error("Full error:", errFull);
     console.error("Stack:", errStack);
     console.log(JSON.stringify({ type: "error", message: errMsg }));
-  }
-
-  // Save task history
-  if (worldPath) {
-    try {
-      await addTaskHistory(message, `Completed in ${totalTurns} turns`, totalTurns);
-    } catch {
-      // Non-fatal
-    }
   }
 }
 
