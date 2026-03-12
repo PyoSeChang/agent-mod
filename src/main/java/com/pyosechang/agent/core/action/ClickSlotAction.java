@@ -2,6 +2,7 @@ package com.pyosechang.agent.core.action;
 
 import com.google.gson.JsonObject;
 import net.minecraft.world.inventory.ClickType;
+import net.minecraft.world.inventory.Slot;
 import net.minecraft.world.item.ItemStack;
 import net.minecraftforge.common.util.FakePlayer;
 import net.minecraftforge.registries.ForgeRegistries;
@@ -12,8 +13,11 @@ public class ClickSlotAction implements Action {
 
     @Override
     public JsonObject execute(FakePlayer agent, JsonObject params) {
-        int slot = params.get("slot").getAsInt();
-        String action = params.has("action") ? params.get("action").getAsString() : "pickup";
+        int slotIndex = params.get("slot").getAsInt();
+        String action = params.has("click_action") ? params.get("click_action").getAsString()
+                : params.has("action_type") ? params.get("action_type").getAsString()
+                : params.has("action") ? params.get("action").getAsString()
+                : "pickup";
 
         ClickType clickType = switch (action) {
             case "quick_move" -> ClickType.QUICK_MOVE;
@@ -29,16 +33,45 @@ public class ClickSlotAction implements Action {
             return result;
         }
 
-        agent.containerMenu.clicked(slot, 0, clickType, agent);
+        // Snapshot before
+        ItemStack beforeStack = ItemStack.EMPTY;
+        if (slotIndex >= 0 && slotIndex < agent.containerMenu.slots.size()) {
+            beforeStack = agent.containerMenu.slots.get(slotIndex).getItem().copy();
+        }
+
+        agent.containerMenu.clicked(slotIndex, 0, clickType, agent);
         agent.containerMenu.broadcastChanges();
 
-        ItemStack carried = agent.containerMenu.getCarried();
+        // Snapshot after
+        ItemStack afterStack = ItemStack.EMPTY;
+        if (slotIndex >= 0 && slotIndex < agent.containerMenu.slots.size()) {
+            afterStack = agent.containerMenu.slots.get(slotIndex).getItem();
+        }
+
         JsonObject result = new JsonObject();
         result.addProperty("ok", true);
+        result.addProperty("slot", slotIndex);
+        result.addProperty("action", action);
+
+        // Report what was in the slot before
+        if (!beforeStack.isEmpty()) {
+            result.addProperty("before_item", ForgeRegistries.ITEMS.getKey(beforeStack.getItem()).toString());
+            result.addProperty("before_count", beforeStack.getCount());
+        }
+
+        // Report what is in the slot after
+        if (!afterStack.isEmpty()) {
+            result.addProperty("after_item", ForgeRegistries.ITEMS.getKey(afterStack.getItem()).toString());
+            result.addProperty("after_count", afterStack.getCount());
+        }
+
+        // Report cursor state
+        ItemStack carried = agent.containerMenu.getCarried();
         if (!carried.isEmpty()) {
             result.addProperty("carried_item", ForgeRegistries.ITEMS.getKey(carried.getItem()).toString());
             result.addProperty("carried_count", carried.getCount());
         }
+
         return result;
     }
 }

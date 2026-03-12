@@ -28,14 +28,13 @@ public class ChatMonitor {
 
         List<MonitorLogBuffer.LogEntry> entries = MonitorLogBuffer.getInstance().getNew();
         for (MonitorLogBuffer.LogEntry entry : entries) {
-            MutableComponent msg = formatLogEntry(entry);
-            for (ServerPlayer player : server.getPlayerList().getPlayers()) {
-                player.sendSystemMessage(msg);
-            }
+            sendFormattedEntry(entry);
         }
     }
 
-    private static MutableComponent formatLogEntry(MonitorLogBuffer.LogEntry entry) {
+    private static final int MAX_CHAT_LINE_LENGTH = 60;
+
+    private static void sendFormattedEntry(MonitorLogBuffer.LogEntry entry) {
         ChatFormatting color = switch (entry.type()) {
             case "thought" -> ChatFormatting.GRAY;
             case "action" -> ChatFormatting.WHITE;
@@ -56,12 +55,33 @@ public class ChatMonitor {
             default -> "[Agent] ";
         };
 
-        // Truncate long messages for chat
         String text = entry.message();
-        if (text.length() > 200) {
-            text = text.substring(0, 197) + "...";
+        // Split by existing newlines first, then wrap long lines
+        String[] paragraphs = text.split("\n");
+        boolean firstLine = true;
+        for (String paragraph : paragraphs) {
+            String linePrefix = firstLine ? prefix : "  ";
+            List<String> wrapped = wrapText(linePrefix + paragraph, MAX_CHAT_LINE_LENGTH);
+            for (String line : wrapped) {
+                MutableComponent msg = Component.literal(line).withStyle(color);
+                for (ServerPlayer player : server.getPlayerList().getPlayers()) {
+                    player.sendSystemMessage(msg);
+                }
+            }
+            firstLine = false;
         }
+    }
 
-        return Component.literal(prefix + text).withStyle(color);
+    private static List<String> wrapText(String text, int maxLength) {
+        List<String> lines = new java.util.ArrayList<>();
+        while (text.length() > maxLength) {
+            // Try to break at a space
+            int breakAt = text.lastIndexOf(' ', maxLength);
+            if (breakAt <= 0) breakAt = maxLength;
+            lines.add(text.substring(0, breakAt));
+            text = "  " + text.substring(breakAt).stripLeading();
+        }
+        if (!text.isEmpty()) lines.add(text);
+        return lines;
     }
 }

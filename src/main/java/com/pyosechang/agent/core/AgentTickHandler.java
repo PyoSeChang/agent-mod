@@ -1,16 +1,20 @@
 package com.pyosechang.agent.core;
 
 import com.pyosechang.agent.AgentMod;
-import com.pyosechang.agent.core.pathfinding.PathFollower;
+import com.pyosechang.agent.core.action.ActiveActionManager;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.entity.item.ItemEntity;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.phys.AABB;
 import net.minecraftforge.common.util.FakePlayer;
 import net.minecraftforge.event.TickEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod;
 
+import java.util.List;
+
 @Mod.EventBusSubscriber(modid = AgentMod.MOD_ID)
 public class AgentTickHandler {
-
-    private static final PathFollower pathFollower = new PathFollower();
 
     @SubscribeEvent
     public static void onServerTick(TickEvent.ServerTickEvent event) {
@@ -21,16 +25,25 @@ public class AgentTickHandler {
 
         FakePlayer agent = manager.getAgent();
 
-        // Tick path follower
-        if (!pathFollower.isFinished()) {
-            pathFollower.tick(agent);
-        }
+        // Tick the active async action (movement, mining, etc.)
+        ActiveActionManager.getInstance().tick(agent);
+
+        // Auto-pickup nearby items (2-block radius)
+        pickupNearbyItems(agent);
     }
 
-    /**
-     * Get the shared PathFollower instance for use by actions.
-     */
-    public static PathFollower getPathFollower() {
-        return pathFollower;
+    private static void pickupNearbyItems(FakePlayer agent) {
+        if (!(agent.level() instanceof ServerLevel level)) return;
+
+        AABB pickupBox = agent.getBoundingBox().inflate(2.0);
+        List<ItemEntity> items = level.getEntitiesOfClass(ItemEntity.class, pickupBox,
+            item -> item.isAlive() && !item.hasPickUpDelay());
+
+        for (ItemEntity itemEntity : items) {
+            ItemStack stack = itemEntity.getItem();
+            if (agent.getInventory().add(stack.copy())) {
+                itemEntity.discard();
+            }
+        }
     }
 }

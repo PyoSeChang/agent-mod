@@ -1,15 +1,19 @@
 package com.pyosechang.agent.core.action;
 
+import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResult;
+import net.minecraft.world.inventory.Slot;
+import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.Vec3;
 import net.minecraftforge.common.util.FakePlayer;
+import net.minecraftforge.registries.ForgeRegistries;
 
 public class OpenContainerAction implements Action {
     @Override
@@ -38,6 +42,21 @@ public class OpenContainerAction implements Action {
         if (agent.containerMenu != agent.inventoryMenu) {
             response.addProperty("container_type", agent.containerMenu.getClass().getSimpleName());
             response.addProperty("slot_count", agent.containerMenu.slots.size());
+
+            // Report all non-empty slots
+            JsonArray slots = new JsonArray();
+            for (int i = 0; i < agent.containerMenu.slots.size(); i++) {
+                Slot slot = agent.containerMenu.slots.get(i);
+                ItemStack stack = slot.getItem();
+                if (!stack.isEmpty()) {
+                    JsonObject slotObj = new JsonObject();
+                    slotObj.addProperty("slot", i);
+                    slotObj.addProperty("item", ForgeRegistries.ITEMS.getKey(stack.getItem()).toString());
+                    slotObj.addProperty("count", stack.getCount());
+                    slots.add(slotObj);
+                }
+            }
+            response.add("slots", slots);
         }
 
         return response;
