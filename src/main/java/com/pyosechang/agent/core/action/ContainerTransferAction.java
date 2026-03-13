@@ -5,7 +5,7 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import net.minecraft.world.inventory.ClickType;
 import net.minecraft.world.item.ItemStack;
-import net.minecraftforge.common.util.FakePlayer;
+import net.minecraft.server.level.ServerPlayer;
 import net.minecraftforge.registries.ForgeRegistries;
 
 /**
@@ -18,7 +18,7 @@ public class ContainerTransferAction implements Action {
     public String getName() { return "container_transfer"; }
 
     @Override
-    public JsonObject execute(FakePlayer agent, JsonObject params) {
+    public JsonObject execute(ServerPlayer agent, JsonObject params) {
         if (agent.containerMenu == agent.inventoryMenu) {
             JsonObject result = new JsonObject();
             result.addProperty("ok", false);

@@ -23,7 +23,7 @@ import com.sun.net.httpserver.HttpServer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
-import net.minecraftforge.common.util.FakePlayer;
+import net.minecraft.server.level.ServerPlayer;
 import net.minecraftforge.fml.loading.FMLPaths;
 import org.slf4j.Logger;
 
@@ -159,7 +159,7 @@ public class AgentHttpServer {
             CompletableFuture<JsonObject> future = new CompletableFuture<>();
             server.execute(() -> {
                 try {
-                    FakePlayer agent = ctx.getFakePlayer();
+                    ServerPlayer agent = ctx.getPlayer();
                     ServerLevel level = (ServerLevel) agent.level();
                     JsonObject obs = ObservationBuilder.build(agent, level, ctx.getName());
                     com.pyosechang.agent.compat.CompatRegistry.getInstance()
@@ -197,7 +197,7 @@ public class AgentHttpServer {
                 CompletableFuture<JsonObject> bridgeFuture = new CompletableFuture<>();
                 server.execute(() -> {
                     try {
-                        FakePlayer agent = ctx.getFakePlayer();
+                        ServerPlayer agent = ctx.getPlayer();
                         CompletableFuture<JsonObject> actionFuture =
                             ctx.getActionManager().startAction(asyncAction, agent, params);
                         actionFuture.whenComplete((result, ex) -> {
@@ -236,7 +236,7 @@ public class AgentHttpServer {
                 CompletableFuture<JsonObject> future = new CompletableFuture<>();
                 server.execute(() -> {
                     try {
-                        FakePlayer agent = ctx.getFakePlayer();
+                        ServerPlayer agent = ctx.getPlayer();
                         JsonObject result = action.execute(agent, params);
                         future.complete(result);
                     } catch (Exception e) {
@@ -260,7 +260,7 @@ public class AgentHttpServer {
             result.addProperty("name", ctx.getName());
             result.addProperty("spawned", true);
             result.addProperty("runtime_running", ctx.isRuntimeRunning());
-            FakePlayer agent = ctx.getFakePlayer();
+            ServerPlayer agent = ctx.getPlayer();
             JsonObject pos = new JsonObject();
             pos.addProperty("x", agent.getX());
             pos.addProperty("y", agent.getY());
@@ -352,7 +352,7 @@ public class AgentHttpServer {
                 JsonObject a = new JsonObject();
                 a.addProperty("name", ctx.getName());
                 a.addProperty("runtime_running", ctx.isRuntimeRunning());
-                FakePlayer fp = ctx.getFakePlayer();
+                ServerPlayer fp = ctx.getPlayer();
                 JsonObject pos = new JsonObject();
                 pos.addProperty("x", fp.getX());
                 pos.addProperty("y", fp.getY());
@@ -395,7 +395,7 @@ public class AgentHttpServer {
                         a.addProperty("spawned", ctx != null);
                         if (ctx != null) {
                             a.addProperty("runtime_running", ctx.isRuntimeRunning());
-                            FakePlayer fp = ctx.getFakePlayer();
+                            ServerPlayer fp = ctx.getPlayer();
                             JsonObject pos = new JsonObject();
                             pos.addProperty("x", fp.getX());
                             pos.addProperty("y", fp.getY());
@@ -428,7 +428,7 @@ public class AgentHttpServer {
                     a.addProperty("spawned", true);
                     a.addProperty("runtime_running", ctx.isRuntimeRunning());
                     a.addProperty("role", ctx.getPersona().getRole());
-                    FakePlayer fp = ctx.getFakePlayer();
+                    ServerPlayer fp = ctx.getPlayer();
                     JsonObject pos = new JsonObject();
                     pos.addProperty("x", fp.getX());
                     pos.addProperty("y", fp.getY());

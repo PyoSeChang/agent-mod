@@ -23,6 +23,8 @@ minecraft {
             workingDirectory project.file('run')
             property 'forge.logging.markers', 'REGISTRIES'
             property 'forge.logging.console.level', 'debug'
+            // Allow AgentPlayer to invoke Player.tick() via MethodHandle across modules
+            jvmArg '--add-opens=java.base/java.lang.invoke=ALL-UNNAMED'
 
             mods {
                 agent {

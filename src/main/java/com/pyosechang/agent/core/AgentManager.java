@@ -11,8 +11,6 @@ import net.minecraft.network.protocol.game.ClientboundSetEntityDataPacket;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
-import net.minecraftforge.common.util.FakePlayer;
-import net.minecraftforge.common.util.FakePlayerFactory;
 import org.slf4j.Logger;
 
 import net.minecraftforge.fml.loading.FMLPaths;
@@ -42,9 +40,15 @@ public class AgentManager {
 
         GameProfile profile = new GameProfile(
             UUID.nameUUIDFromBytes(("Agent_" + name).getBytes()), "[" + name + "]");
-        FakePlayer fakePlayer = FakePlayerFactory.get(level, profile);
-        fakePlayer.setPos(pos.getX() + 0.5, pos.getY(), pos.getZ() + 0.5);
-        fakePlayer.setInvulnerable(true);
+
+        // Create AgentPlayer (ServerPlayer subclass)
+        AgentPlayer agentPlayer = new AgentPlayer(server, level, profile);
+
+        // Set up mock network handler (sets agentPlayer.connection)
+        new AgentNetHandler(server, agentPlayer);
+
+        agentPlayer.setPos(pos.getX() + 0.5, pos.getY(), pos.getZ() + 0.5);
+        agentPlayer.setInvulnerable(true);
 
         // Load persona from .agent/agents/{name}/PERSONA.md
         Path personaFile = FMLPaths.GAMEDIR.get().resolve(".agent/agents/" + name + "/PERSONA.md");
@@ -58,21 +62,28 @@ public class AgentManager {
             LOGGER.info("No PERSONA.md for '{}', using defaults", name);
         }
 
-        AgentContext ctx = new AgentContext(name, fakePlayer, persona);
+        AgentContext ctx = new AgentContext(name, agentPlayer, persona);
         agents.put(name, ctx);
 
-        // Send visibility packets to all online players
+        // 1) PlayerInfo FIRST — client ignores spawn packets for unknown players
         ClientboundPlayerInfoUpdatePacket infoPacket =
             new ClientboundPlayerInfoUpdatePacket(
                 EnumSet.of(ClientboundPlayerInfoUpdatePacket.Action.ADD_PLAYER),
-                List.of(fakePlayer));
-        ClientboundAddPlayerPacket spawnPacket = new ClientboundAddPlayerPacket(fakePlayer);
-        ClientboundSetEntityDataPacket dataPacket =
-            new ClientboundSetEntityDataPacket(fakePlayer.getId(),
-                fakePlayer.getEntityData().getNonDefaultValues());
-
+                List.of(agentPlayer));
         for (ServerPlayer player : server.getPlayerList().getPlayers()) {
             player.connection.send(infoPacket);
+        }
+
+        // 2) Register entity in world — entity tracker may send spawn packets
+        level.addNewPlayer(agentPlayer);
+
+        // 3) Explicit spawn + data packets (in case tracker didn't cover all players)
+        ClientboundAddPlayerPacket spawnPacket = new ClientboundAddPlayerPacket(agentPlayer);
+        ClientboundSetEntityDataPacket dataPacket =
+            new ClientboundSetEntityDataPacket(agentPlayer.getId(),
+                agentPlayer.getEntityData().getNonDefaultValues());
+
+        for (ServerPlayer player : server.getPlayerList().getPlayers()) {
             player.connection.send(spawnPacket);
             if (dataPacket.packedItems() != null) {
                 player.connection.send(dataPacket);
@@ -87,11 +98,13 @@ public class AgentManager {
         AgentContext ctx = agents.remove(name);
         if (ctx == null) return false;
 
-        FakePlayer fakePlayer = ctx.getFakePlayer();
+        ServerPlayer agentPlayer = ctx.getPlayer();
+
+        // Remove from clients: entity + tab list
         ClientboundRemoveEntitiesPacket removePacket =
-            new ClientboundRemoveEntitiesPacket(fakePlayer.getId());
+            new ClientboundRemoveEntitiesPacket(agentPlayer.getId());
         ClientboundPlayerInfoRemovePacket infoRemovePacket =
-            new ClientboundPlayerInfoRemovePacket(List.of(fakePlayer.getUUID()));
+            new ClientboundPlayerInfoRemovePacket(List.of(agentPlayer.getUUID()));
 
         if (server != null) {
             for (ServerPlayer player : server.getPlayerList().getPlayers()) {
@@ -100,7 +113,8 @@ public class AgentManager {
             }
         }
 
-        fakePlayer.discard();
+        agentPlayer.discard();
+
         LOGGER.info("Agent '{}' despawned", name);
         return true;
     }
@@ -108,6 +122,31 @@ public class AgentManager {
     public void despawnAll() {
         for (String name : Set.copyOf(agents.keySet())) {
             despawn(name);
+        }
+    }
+
+    /**
+     * Send agent visibility packets to a newly joined player.
+     */
+    public void sendAgentInfoToPlayer(ServerPlayer player) {
+        if (agents.isEmpty()) return;
+
+        for (AgentContext ctx : agents.values()) {
+            ServerPlayer agentPlayer = ctx.getPlayer();
+            ClientboundPlayerInfoUpdatePacket infoPacket =
+                new ClientboundPlayerInfoUpdatePacket(
+                    EnumSet.of(ClientboundPlayerInfoUpdatePacket.Action.ADD_PLAYER),
+                    List.of(agentPlayer));
+            ClientboundAddPlayerPacket spawnPacket = new ClientboundAddPlayerPacket(agentPlayer);
+            ClientboundSetEntityDataPacket dataPacket =
+                new ClientboundSetEntityDataPacket(agentPlayer.getId(),
+                    agentPlayer.getEntityData().getNonDefaultValues());
+
+            player.connection.send(infoPacket);
+            player.connection.send(spawnPacket);
+            if (dataPacket.packedItems() != null) {
+                player.connection.send(dataPacket);
+            }
         }
     }
 

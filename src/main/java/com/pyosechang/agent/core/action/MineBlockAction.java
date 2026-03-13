@@ -5,7 +5,7 @@ import com.pyosechang.agent.core.AgentAnimation;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.block.state.BlockState;
-import net.minecraftforge.common.util.FakePlayer;
+import net.minecraft.server.level.ServerPlayer;
 import net.minecraftforge.registries.ForgeRegistries;
 
 import java.util.concurrent.CompletableFuture;
@@ -18,7 +18,7 @@ public class MineBlockAction implements AsyncAction {
 
     private CompletableFuture<JsonObject> future;
     private boolean active = false;
-    private FakePlayer cachedAgent;
+    private ServerPlayer cachedAgent;
     private BlockPos targetPos;
     private float destroyProgress; // per-tick progress
     private int currentTick;
@@ -29,7 +29,7 @@ public class MineBlockAction implements AsyncAction {
     public String getName() { return "mine_block"; }
 
     @Override
-    public CompletableFuture<JsonObject> start(FakePlayer agent, JsonObject params) {
+    public CompletableFuture<JsonObject> start(ServerPlayer agent, JsonObject params) {
         future = new CompletableFuture<>();
         active = false;
         cachedAgent = agent;
@@ -76,7 +76,7 @@ public class MineBlockAction implements AsyncAction {
     }
 
     @Override
-    public void tick(FakePlayer agent) {
+    public void tick(ServerPlayer agent) {
         if (!active || future.isDone()) {
             active = false;
             return;
@@ -138,7 +138,7 @@ public class MineBlockAction implements AsyncAction {
     @Override
     public boolean isActive() { return active; }
 
-    private void finishMining(FakePlayer agent, ServerLevel level, int ticksUsed) {
+    private void finishMining(ServerPlayer agent, ServerLevel level, int ticksUsed) {
         active = false;
         // Reset crack animation
         cleanupAnimation(level);

@@ -12,7 +12,7 @@ import net.minecraft.commands.Commands;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerLevel;
-import net.minecraftforge.common.util.FakePlayer;
+import net.minecraft.server.level.ServerPlayer;
 import net.minecraftforge.event.RegisterCommandsEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod;
@@ -168,7 +168,7 @@ public class AgentCommand {
 
         source.sendSuccess(() -> Component.literal("[Agent] Spawned agents (" + manager.getAgentCount() + "):"), false);
         for (AgentContext agent : manager.getAllAgents()) {
-            FakePlayer fp = agent.getFakePlayer();
+            ServerPlayer fp = agent.getPlayer();
             String s = agent.isRuntimeRunning() ? "executing" : "idle";
             source.sendSuccess(() -> Component.literal(String.format(
                 "  %s [%s] at %.1f %.1f %.1f",
@@ -184,7 +184,7 @@ public class AgentCommand {
             return 0;
         }
 
-        FakePlayer fp = agent.getFakePlayer();
+        ServerPlayer fp = agent.getPlayer();
         String s = agent.isRuntimeRunning() ? "executing" : "idle";
         source.sendSuccess(() -> Component.literal(String.format(
             "[%s] %s at %.1f %.1f %.1f", name, s, fp.getX(), fp.getY(), fp.getZ())), false);

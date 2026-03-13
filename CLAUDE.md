@@ -1,6 +1,6 @@
 # agent-mod
 
-Minecraft Forge 1.20.1 AI agent mod — Multi-agent system with named FakePlayers, persona-based roles, and scoped memory. Each agent runs its own Claude Agent SDK runtime with filtered MCP tools.
+Minecraft Forge 1.20.1 AI agent mod — Multi-agent system with AgentPlayer (ServerPlayer subclass), persona-based roles, and scoped memory. Each agent runs its own Claude Agent SDK runtime with filtered MCP tools.
 
 ## Build & Run
 
@@ -17,7 +17,9 @@ agent-mod/
 ├── src/main/java/com/pyosechang/agent/
 │   ├── AgentMod.java                 # Entry point: action registration, lifecycle
 │   ├── core/
-│   │   ├── AgentContext.java         # Per-agent state bundle (FakePlayer, ActionManager, Persona, etc.)
+│   │   ├── AgentPlayer.java          # ServerPlayer subclass (sleep voting, invulnerability, no-op client ops)
+│   │   ├── AgentNetHandler.java     # Mock network handler (EmbeddedChannel, absorbs packets)
+│   │   ├── AgentContext.java         # Per-agent state bundle (ServerPlayer, ActionManager, Persona, etc.)
 │   │   ├── AgentManager.java        # Multi-agent manager (spawn/despawn/routing)
 │   │   ├── PersonaConfig.java       # PERSONA.md parser (role, personality, tools)
 │   │   ├── AgentAnimation.java      # lookAt/swingArm packet broadcast
@@ -96,18 +98,19 @@ agent-mod/
                                       ↓
                                     HTTP Bridge (/agent/{name}/...)
                                       ↓
-                                    AgentContext → ActionManager → FakePlayer
+                                    AgentContext → ActionManager → AgentPlayer (ServerPlayer)
 ```
 
 ### Multi-Agent Flow
 
 ```
 AgentManager (ConcurrentHashMap<String, AgentContext>)
-  ├── "alex" → AgentContext { FakePlayer, ActionManager, PersonaConfig, InterventionQueue }
-  ├── "steve" → AgentContext { FakePlayer, ActionManager, PersonaConfig, InterventionQueue }
+  ├── "alex" → AgentContext { AgentPlayer, ActionManager, PersonaConfig, InterventionQueue }
+  ├── "steve" → AgentContext { AgentPlayer, ActionManager, PersonaConfig, InterventionQueue }
   └── ...
 
 Per-agent isolation:
+  - Each agent is an AgentPlayer (ServerPlayer subclass) with mock AgentNetHandler
   - Each agent has its own ActionManager (no shared singleton)
   - Each agent runs its own Node.js runtime process
   - MCP tool list filtered per PERSONA.md
@@ -180,6 +183,7 @@ See `docs/quality/components/index.md` for full definitions and per-component ch
 - Per-agent HTTP routing: `/agent/{name}/observation`, `/agent/{name}/action`, etc.
 - All async actions support dynamic timeout via `getTimeoutMs()`
 - All actions broadcast lookAt/swingArm animations
+- Agents are AgentPlayer (ServerPlayer subclass) — full entity system integration (physics, tracking, rendering)
 - Auto item pickup every tick (2-block radius) for all agents
 - Agent persona files at `run/.agent/agents/{name}/PERSONA.md`
 - Memory: global at `run/.agent/memory.json`, per-agent at `run/.agent/agents/{name}/memory.json`

@@ -6,7 +6,7 @@ import net.minecraft.world.SimpleContainer;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.RecipeType;
 import net.minecraft.world.item.crafting.SmeltingRecipe;
-import net.minecraftforge.common.util.FakePlayer;
+import net.minecraft.server.level.ServerPlayer;
 import net.minecraftforge.registries.ForgeRegistries;
 
 import java.util.Optional;
@@ -16,7 +16,7 @@ public class SmeltAction implements Action {
     public String getName() { return "smelt"; }
 
     @Override
-    public JsonObject execute(FakePlayer agent, JsonObject params) {
+    public JsonObject execute(ServerPlayer agent, JsonObject params) {
         String inputItem = params.has("input") ? params.get("input").getAsString() : null;
         ServerLevel level = (ServerLevel) agent.level();
         JsonObject result = new JsonObject();

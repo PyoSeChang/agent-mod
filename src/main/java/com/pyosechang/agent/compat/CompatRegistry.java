@@ -4,7 +4,7 @@ import com.google.gson.JsonObject;
 import com.mojang.logging.LogUtils;
 import com.pyosechang.agent.core.action.Action;
 import com.pyosechang.agent.core.action.ActionRegistry;
-import net.minecraftforge.common.util.FakePlayer;
+import net.minecraft.server.level.ServerPlayer;
 import net.minecraftforge.fml.ModList;
 import org.slf4j.Logger;
 
@@ -29,7 +29,7 @@ public class CompatRegistry {
         }
     }
 
-    public void extendObservation(JsonObject obs, FakePlayer agent) {
+    public void extendObservation(JsonObject obs, ServerPlayer agent) {
         JsonObject modData = new JsonObject();
         for (ModCompat compat : compats) {
             try {

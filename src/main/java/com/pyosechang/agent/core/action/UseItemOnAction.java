@@ -11,7 +11,7 @@ import net.minecraft.world.InteractionResult;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.Vec3;
-import net.minecraftforge.common.util.FakePlayer;
+import net.minecraft.server.level.ServerPlayer;
 
 /**
  * Simulates a right-click on a block face — the universal "use item on block" action.
@@ -23,7 +23,7 @@ public class UseItemOnAction implements Action {
     public String getName() { return "use_item_on"; }
 
     @Override
-    public JsonObject execute(FakePlayer agent, JsonObject params) {
+    public JsonObject execute(ServerPlayer agent, JsonObject params) {
         JsonObject result = new JsonObject();
 
         int x = params.get("x").getAsInt();
@@ -68,7 +68,7 @@ public class UseItemOnAction implements Action {
         ServerPlayerGameMode gameMode = agent.gameMode;
         if (gameMode == null) {
             result.addProperty("ok", false);
-            result.addProperty("error", "Agent gameMode is null — FakePlayer may not be fully initialized");
+            result.addProperty("error", "Agent gameMode is null — ServerPlayer may not be fully initialized");
             return result;
         }
 
@@ -77,6 +77,12 @@ public class UseItemOnAction implements Action {
         AgentAnimation.swingArm(agent);
 
         InteractionResult interactionResult = gameMode.useItemOn(agent, level, mainHandItem, hand, hitResult);
+
+        // If useItemOn returns PASS, try useItem — handles items like buckets, ender pearls,
+        // food, etc. that use Item.use() instead of Item.useOn()
+        if (interactionResult == InteractionResult.PASS && !mainHandItem.isEmpty()) {
+            interactionResult = gameMode.useItem(agent, level, mainHandItem, hand);
+        }
 
         result.addProperty("ok", true);
         result.addProperty("interaction_result", interactionResult.name());

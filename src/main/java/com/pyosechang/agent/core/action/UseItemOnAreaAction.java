@@ -13,7 +13,7 @@ import net.minecraft.world.InteractionResult;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.Vec3;
-import net.minecraftforge.common.util.FakePlayer;
+import net.minecraft.server.level.ServerPlayer;
 
 import com.google.gson.JsonArray;
 
@@ -56,7 +56,7 @@ public class UseItemOnAreaAction implements AsyncAction {
     }
 
     @Override
-    public CompletableFuture<JsonObject> start(FakePlayer agent, JsonObject params) {
+    public CompletableFuture<JsonObject> start(ServerPlayer agent, JsonObject params) {
         future = new CompletableFuture<>();
         active = false;
 
@@ -116,7 +116,7 @@ public class UseItemOnAreaAction implements AsyncAction {
     }
 
     @Override
-    public void tick(FakePlayer agent) {
+    public void tick(ServerPlayer agent) {
         if (!active || future.isDone()) {
             active = false;
             return;
@@ -133,7 +133,7 @@ public class UseItemOnAreaAction implements AsyncAction {
         }
     }
 
-    private void tickNextPos(FakePlayer agent, ServerLevel level) {
+    private void tickNextPos(ServerPlayer agent, ServerLevel level) {
         if (posIndex >= positions.size()) {
             finishArea();
             return;
@@ -153,7 +153,7 @@ public class UseItemOnAreaAction implements AsyncAction {
         }
     }
 
-    private void startWalking(FakePlayer agent, ServerLevel level, BlockPos target) {
+    private void startWalking(ServerPlayer agent, ServerLevel level, BlockPos target) {
         // Walk to a position near the target
         BlockPos walkTo = findStandingNear(level, target);
         if (walkTo == null) {
@@ -189,7 +189,7 @@ public class UseItemOnAreaAction implements AsyncAction {
         subState = SubState.WALKING;
     }
 
-    private void tickWalking(FakePlayer agent, ServerLevel level) {
+    private void tickWalking(ServerPlayer agent, ServerLevel level) {
         BlockPos nextWp = pathFollower.getCurrentTarget();
         if (nextWp != null) {
             AgentAnimation.lookAt(agent, nextWp.getX() + 0.5, agent.getEyeY(), nextWp.getZ() + 0.5);
@@ -203,7 +203,7 @@ public class UseItemOnAreaAction implements AsyncAction {
         }
     }
 
-    private void useItemAt(FakePlayer agent, ServerLevel level, BlockPos target) {
+    private void useItemAt(ServerPlayer agent, ServerLevel level, BlockPos target) {
         AgentAnimation.lookAt(agent, target.getX() + 0.5, target.getY() + 0.5, target.getZ() + 0.5);
         AgentAnimation.swingArm(agent);
 

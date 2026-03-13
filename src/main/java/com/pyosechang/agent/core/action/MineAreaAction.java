@@ -13,7 +13,7 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
-import net.minecraftforge.common.util.FakePlayer;
+import net.minecraft.server.level.ServerPlayer;
 import net.minecraftforge.registries.ForgeRegistries;
 
 import java.util.*;
@@ -27,7 +27,7 @@ public class MineAreaAction implements AsyncAction {
 
     private CompletableFuture<JsonObject> future;
     private boolean active = false;
-    private FakePlayer cachedAgent;
+    private ServerPlayer cachedAgent;
 
     // Block queue (top-to-bottom for natural mining order)
     private List<BlockPos> blocks;
@@ -62,7 +62,7 @@ public class MineAreaAction implements AsyncAction {
     }
 
     @Override
-    public CompletableFuture<JsonObject> start(FakePlayer agent, JsonObject params) {
+    public CompletableFuture<JsonObject> start(ServerPlayer agent, JsonObject params) {
         future = new CompletableFuture<>();
         cachedAgent = agent;
         active = false;
@@ -121,7 +121,7 @@ public class MineAreaAction implements AsyncAction {
     }
 
     @Override
-    public void tick(FakePlayer agent) {
+    public void tick(ServerPlayer agent) {
         if (!active || future.isDone()) {
             active = false;
             return;
@@ -139,7 +139,7 @@ public class MineAreaAction implements AsyncAction {
         }
     }
 
-    private void tickNextBlock(FakePlayer agent, ServerLevel level) {
+    private void tickNextBlock(ServerPlayer agent, ServerLevel level) {
         if (blockIndex >= blocks.size()) {
             finishArea();
             return;
@@ -166,7 +166,7 @@ public class MineAreaAction implements AsyncAction {
         }
     }
 
-    private void startWalking(FakePlayer agent, ServerLevel level, BlockPos target) {
+    private void startWalking(ServerPlayer agent, ServerLevel level, BlockPos target) {
         // Find a position adjacent to the target we can stand on
         BlockPos walkTo = findStandingPosition(level, target);
         if (walkTo == null) {
@@ -194,7 +194,7 @@ public class MineAreaAction implements AsyncAction {
         subState = SubState.WALKING;
     }
 
-    private void tickWalking(FakePlayer agent, ServerLevel level) {
+    private void tickWalking(ServerPlayer agent, ServerLevel level) {
         // Look at next waypoint
         BlockPos nextWp = pathFollower.getCurrentTarget();
         if (nextWp != null) {
@@ -218,7 +218,7 @@ public class MineAreaAction implements AsyncAction {
         }
     }
 
-    private void startMining(FakePlayer agent, ServerLevel level, BlockPos target, BlockState state) {
+    private void startMining(ServerPlayer agent, ServerLevel level, BlockPos target, BlockState state) {
         destroyProgress = state.getDestroyProgress(agent, level, target);
         if (destroyProgress <= 0) {
             blocksSkipped++;
@@ -240,7 +240,7 @@ public class MineAreaAction implements AsyncAction {
         subState = SubState.MINING;
     }
 
-    private void tickMining(FakePlayer agent, ServerLevel level) {
+    private void tickMining(ServerPlayer agent, ServerLevel level) {
         BlockState state = level.getBlockState(miningTarget);
         if (state.isAir()) {
             blocksSkipped++;
@@ -264,7 +264,7 @@ public class MineAreaAction implements AsyncAction {
         }
     }
 
-    private void finishMiningBlock(FakePlayer agent, ServerLevel level) {
+    private void finishMiningBlock(ServerPlayer agent, ServerLevel level) {
         // Clear crack animation
         level.destroyBlockProgress(agent.getId(), miningTarget, -1);
 

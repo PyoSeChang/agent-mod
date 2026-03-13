@@ -2,7 +2,7 @@ package com.pyosechang.agent.core.action;
 
 import com.google.gson.JsonObject;
 import com.mojang.logging.LogUtils;
-import net.minecraftforge.common.util.FakePlayer;
+import net.minecraft.server.level.ServerPlayer;
 import org.slf4j.Logger;
 
 import java.util.concurrent.CompletableFuture;
@@ -24,7 +24,7 @@ public class ActiveActionManager {
     /**
      * Start a new async action, cancelling any currently running one.
      */
-    public CompletableFuture<JsonObject> startAction(AsyncAction action, FakePlayer agent, JsonObject params) {
+    public CompletableFuture<JsonObject> startAction(AsyncAction action, ServerPlayer agent, JsonObject params) {
         // Cancel existing action
         if (currentAction != null && currentAction.isActive()) {
             LOGGER.debug("Cancelling current action {} for new action {}",
@@ -40,7 +40,7 @@ public class ActiveActionManager {
     /**
      * Tick the current async action. Called every server tick from AgentTickHandler.
      */
-    public void tick(FakePlayer agent) {
+    public void tick(ServerPlayer agent) {
         if (currentAction != null && currentAction.isActive()) {
             currentAction.tick(agent);
         }

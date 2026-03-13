@@ -8,7 +8,7 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.*;
 import net.minecraft.world.level.block.Blocks;
-import net.minecraftforge.common.util.FakePlayer;
+import net.minecraft.server.level.ServerPlayer;
 import net.minecraftforge.registries.ForgeRegistries;
 
 import java.util.*;
@@ -23,7 +23,7 @@ public class CraftAction implements Action {
     public String getName() { return "craft"; }
 
     @Override
-    public JsonObject execute(FakePlayer agent, JsonObject params) {
+    public JsonObject execute(ServerPlayer agent, JsonObject params) {
         String recipeId = params.has("recipe") ? params.get("recipe").getAsString() : null;
         int count = params.has("count") ? params.get("count").getAsInt() : 1;
         ServerLevel level = (ServerLevel) agent.level();
@@ -124,7 +124,7 @@ public class CraftAction implements Action {
         return false;
     }
 
-    private boolean hasCraftingTableNearby(FakePlayer agent, ServerLevel level) {
+    private boolean hasCraftingTableNearby(ServerPlayer agent, ServerLevel level) {
         BlockPos center = agent.blockPosition();
         int range = 5; // check within 4.5 blocks
         for (int dx = -range; dx <= range; dx++) {
@@ -146,7 +146,7 @@ public class CraftAction implements Action {
      * Try to match all ingredients to inventory slots.
      * Returns map of (slot -> consume count), or null if not possible.
      */
-    private Map<Integer, Integer> matchIngredients(FakePlayer agent, List<Ingredient> ingredients) {
+    private Map<Integer, Integer> matchIngredients(ServerPlayer agent, List<Ingredient> ingredients) {
         Map<Integer, Integer> slotConsumption = new LinkedHashMap<>();
 
         for (Ingredient ingredient : ingredients) {

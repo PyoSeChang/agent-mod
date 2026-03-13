@@ -4,7 +4,7 @@ import com.google.gson.JsonObject;
 import com.mojang.logging.LogUtils;
 import com.pyosechang.agent.compat.ModCompat;
 import com.pyosechang.agent.core.action.Action;
-import net.minecraftforge.common.util.FakePlayer;
+import net.minecraft.server.level.ServerPlayer;
 import org.slf4j.Logger;
 
 import java.util.ArrayList;
@@ -32,7 +32,7 @@ public class CreateCompat implements ModCompat {
     }
 
     @Override
-    public void extendObservation(JsonObject obs, FakePlayer agent) {
+    public void extendObservation(JsonObject obs, ServerPlayer agent) {
         // TODO: Query nearby kinetic network
         // JsonObject create = new JsonObject();
         // create.addProperty("rpm", ...);

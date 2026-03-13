@@ -5,7 +5,7 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.mojang.logging.LogUtils;
 import com.pyosechang.agent.core.AgentLogger;
-import net.minecraftforge.common.util.FakePlayer;
+import net.minecraft.server.level.ServerPlayer;
 import org.slf4j.Logger;
 
 import java.util.ArrayList;
@@ -38,7 +38,7 @@ public class SequenceAction implements AsyncAction {
     public long getTimeoutMs() { return 300_000; } // 5 minutes
 
     @Override
-    public CompletableFuture<JsonObject> start(FakePlayer agent, JsonObject params) {
+    public CompletableFuture<JsonObject> start(ServerPlayer agent, JsonObject params) {
         future = new CompletableFuture<>();
         active = false;
 
@@ -72,7 +72,7 @@ public class SequenceAction implements AsyncAction {
     }
 
     @Override
-    public void tick(FakePlayer agent) {
+    public void tick(ServerPlayer agent) {
         if (!active || future.isDone()) {
             active = false;
             return;
@@ -93,7 +93,7 @@ public class SequenceAction implements AsyncAction {
         processNextStep(agent);
     }
 
-    private void processNextStep(FakePlayer agent) {
+    private void processNextStep(ServerPlayer agent) {
         if (currentStepIndex >= steps.size()) {
             finishSequence(true, null);
             return;

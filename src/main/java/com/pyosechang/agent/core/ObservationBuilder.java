@@ -11,7 +11,7 @@ import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.properties.Property;
-import net.minecraftforge.common.util.FakePlayer;
+import net.minecraft.server.level.ServerPlayer;
 import net.minecraftforge.registries.ForgeRegistries;
 
 import java.util.Comparator;
@@ -21,18 +21,18 @@ import java.util.Map;
 public class ObservationBuilder {
 
     /** Backward-compatible overloads */
-    public static JsonObject build(FakePlayer agent) {
+    public static JsonObject build(ServerPlayer agent) {
         return build(agent, null, null);
     }
 
-    public static JsonObject build(FakePlayer agent, ServerLevel level) {
+    public static JsonObject build(ServerPlayer agent, ServerLevel level) {
         return build(agent, level, null);
     }
 
     /**
      * Build a full observation JSON for the agent including world data.
      */
-    public static JsonObject build(FakePlayer agent, ServerLevel level, String agentName) {
+    public static JsonObject build(ServerPlayer agent, ServerLevel level, String agentName) {
         JsonObject obs = new JsonObject();
 
         // Position
@@ -81,7 +81,7 @@ public class ObservationBuilder {
     /**
      * Scan blocks within 8-block radius, return up to 100 closest non-air blocks.
      */
-    private static JsonArray buildNearbyBlocks(FakePlayer agent, ServerLevel level) {
+    private static JsonArray buildNearbyBlocks(ServerPlayer agent, ServerLevel level) {
         JsonArray blocks = new JsonArray();
         BlockPos center = agent.blockPosition();
         int radius = 8;
@@ -140,7 +140,7 @@ public class ObservationBuilder {
     /**
      * Find all entities within 16-block radius of the agent.
      */
-    private static JsonArray buildNearbyEntities(FakePlayer agent, ServerLevel level) {
+    private static JsonArray buildNearbyEntities(ServerPlayer agent, ServerLevel level) {
         JsonArray entities = new JsonArray();
 
         List<Entity> nearby = level.getEntitiesOfClass(
@@ -180,7 +180,7 @@ public class ObservationBuilder {
     /**
      * Build acquaintances section — name, description, spawned status, distance.
      */
-    private static JsonArray buildAcquaintances(FakePlayer agent, AgentContext ctx) {
+    private static JsonArray buildAcquaintances(ServerPlayer agent, AgentContext ctx) {
         JsonArray arr = new JsonArray();
         for (PersonaConfig.Acquaintance acq : ctx.getPersona().getAcquaintances()) {
             JsonObject obj = new JsonObject();
@@ -190,12 +190,12 @@ public class ObservationBuilder {
             AgentContext acqCtx = AgentManager.getInstance().getAgent(acq.name());
             if (acqCtx != null) {
                 obj.addProperty("spawned", true);
-                double dist = agent.distanceTo(acqCtx.getFakePlayer());
+                double dist = agent.distanceTo(acqCtx.getPlayer());
                 obj.addProperty("distance", Math.round(dist * 10.0) / 10.0);
                 JsonObject pos = new JsonObject();
-                pos.addProperty("x", acqCtx.getFakePlayer().getX());
-                pos.addProperty("y", acqCtx.getFakePlayer().getY());
-                pos.addProperty("z", acqCtx.getFakePlayer().getZ());
+                pos.addProperty("x", acqCtx.getPlayer().getX());
+                pos.addProperty("y", acqCtx.getPlayer().getY());
+                pos.addProperty("z", acqCtx.getPlayer().getZ());
                 obj.add("position", pos);
             } else {
                 obj.addProperty("spawned", false);
@@ -208,7 +208,7 @@ public class ObservationBuilder {
     /**
      * Build memories section with title_index (distance-sorted) and auto_loaded (content included).
      */
-    private static JsonObject buildMemories(FakePlayer agent, String agentName) {
+    private static JsonObject buildMemories(ServerPlayer agent, String agentName) {
         JsonObject memories = new JsonObject();
         double ax = agent.getX(), ay = agent.getY(), az = agent.getZ();
         MemoryManager mm = MemoryManager.getInstance();

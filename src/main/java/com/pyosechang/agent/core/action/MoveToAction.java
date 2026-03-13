@@ -9,7 +9,6 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.network.protocol.game.ClientboundTeleportEntityPacket;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
-import net.minecraftforge.common.util.FakePlayer;
 
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
@@ -33,7 +32,7 @@ public class MoveToAction implements AsyncAction {
     public String getName() { return "move_to"; }
 
     @Override
-    public CompletableFuture<JsonObject> start(FakePlayer agent, JsonObject params) {
+    public CompletableFuture<JsonObject> start(ServerPlayer agent, JsonObject params) {
         future = new CompletableFuture<>();
         active = false;
         stuckTicks = 0;
@@ -84,7 +83,7 @@ public class MoveToAction implements AsyncAction {
     }
 
     @Override
-    public void tick(FakePlayer agent) {
+    public void tick(ServerPlayer agent) {
         if (!active || future.isDone()) {
             active = false;
             return;
@@ -164,7 +163,7 @@ public class MoveToAction implements AsyncAction {
         return future;
     }
 
-    private void broadcastPosition(FakePlayer agent) {
+    private void broadcastPosition(ServerPlayer agent) {
         ClientboundTeleportEntityPacket packet = new ClientboundTeleportEntityPacket(agent);
         var server = AgentManager.getInstance().getServer();
         if (server != null) {
@@ -174,7 +173,7 @@ public class MoveToAction implements AsyncAction {
         }
     }
 
-    private JsonObject posToJson(FakePlayer agent) {
+    private JsonObject posToJson(ServerPlayer agent) {
         JsonObject pos = new JsonObject();
         pos.addProperty("x", agent.getX());
         pos.addProperty("y", agent.getY());

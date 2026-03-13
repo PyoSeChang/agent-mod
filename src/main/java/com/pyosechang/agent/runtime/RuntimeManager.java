@@ -85,12 +85,21 @@ public class RuntimeManager {
 
                 int exitCode = process.waitFor();
                 LOGGER.info("Agent '{}' runtime exited with code {}", agentName, exitCode);
-                if (exitCode != 0 && source.getServer() != null) {
-                    source.getServer().execute(() -> {
-                        source.sendFailure(Component.literal(
-                            "[" + agentName + "] Runtime error (exit code " + exitCode + ")"));
-                    });
+                if (exitCode != 0 && !ctx.isStoppedByUser()) {
+                    // Reset session on genuine crash to prevent corrupted resume
+                    ctx.resetSession();
+                    LOGGER.info("Agent '{}' session reset due to crash (code {})", agentName, exitCode);
+                    if (source.getServer() != null) {
+                        source.getServer().execute(() -> {
+                            source.sendFailure(Component.literal(
+                                "[" + agentName + "] Runtime crash (exit code " + exitCode + ") — session reset"));
+                        });
+                    }
+                } else if (exitCode != 0) {
+                    // Stopped by user — keep session for resume
+                    LOGGER.info("Agent '{}' runtime stopped by user", agentName);
                 }
+                ctx.setStoppedByUser(false);
             } catch (Exception e) {
                 LOGGER.error("Failed to launch agent runtime for '{}'", agentName, e);
                 if (source.getServer() != null) {
@@ -161,6 +170,7 @@ public class RuntimeManager {
     public void stop(String agentName) {
         AgentContext ctx = AgentManager.getInstance().getAgent(agentName);
         if (ctx != null && ctx.isRuntimeRunning()) {
+            ctx.setStoppedByUser(true);
             ctx.getRuntimeProcess().destroyForcibly();
             LOGGER.info("Agent '{}' runtime forcibly stopped", agentName);
             ctx.setRuntimeProcess(null);
@@ -170,6 +180,7 @@ public class RuntimeManager {
     public void stopAll() {
         for (AgentContext ctx : AgentManager.getInstance().getAllAgents()) {
             if (ctx.isRuntimeRunning()) {
+                ctx.setStoppedByUser(true);
                 ctx.getRuntimeProcess().destroyForcibly();
                 ctx.setRuntimeProcess(null);
             }

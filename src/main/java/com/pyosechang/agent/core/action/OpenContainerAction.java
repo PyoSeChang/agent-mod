@@ -12,7 +12,7 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.Vec3;
-import net.minecraftforge.common.util.FakePlayer;
+import net.minecraft.server.level.ServerPlayer;
 import net.minecraftforge.registries.ForgeRegistries;
 
 public class OpenContainerAction implements Action {
@@ -20,7 +20,7 @@ public class OpenContainerAction implements Action {
     public String getName() { return "open_container"; }
 
     @Override
-    public JsonObject execute(FakePlayer agent, JsonObject params) {
+    public JsonObject execute(ServerPlayer agent, JsonObject params) {
         int x = params.get("x").getAsInt();
         int y = params.get("y").getAsInt();
         int z = params.get("z").getAsInt();

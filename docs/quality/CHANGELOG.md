@@ -1,5 +1,41 @@
 # CHANGELOG
 
+## v0.4.0 — 2026-03-14 `[body, actions, infra]`
+
+FakePlayer → AgentPlayer(ServerPlayer subclass) 전환. 에이전트에 실제 플레이어 물리(중력, 충돌), 장비 동기화, 아이템 픽업을 부여.
+
+### 변경 사항
+
+**`body`**
+- `AgentPlayer.java` 신규: ServerPlayer subclass. `tick()`에서 `ServerPlayer.tick()` + `Player.tick()` 체인(baseTick, detectEquipmentUpdates, aiStep) 수동 호출 — ServerPlayer.tick()이 super.tick()을 호출하지 않는 바닐라 설계를 보완
+- `AgentNetHandler.java` 신규: mock ServerGamePacketListenerImpl. EmbeddedChannel + 리플렉션으로 Connection.channel 설정. 패킷 send/tick no-op
+- `AgentManager.spawn()`: AgentPlayer 생성 → AgentNetHandler 설정 → PlayerInfo → addNewPlayer → AddPlayer + SetEntityData 패킷 전송
+- `AgentManager.sendAgentInfoToPlayer()`: 후접속 플레이어에게 에이전트 패킷 전송
+- `AgentTickHandler`: 20틱 주기 ClientboundTeleportEntityPacket 브로드캐스트 (클라이언트 위치 동기화)
+- `FakePlayerManager.java` 삭제
+
+**`actions`**
+- `UseItemOnAction`: useItemOn() → PASS 시 useItem() fallback 추가 — 물 양동이, 엔더 진주 등 Item.use() 기반 아이템 지원
+- 전 액션 FakePlayer → ServerPlayer 타입 전환 (Action, AsyncAction, 17개 구현체)
+
+**`infra`**
+- `RuntimeManager`: 비정상 종료(exit code != 0, 유저 stop 아닌 경우) 시 세션 자동 리셋 — 깨진 세션 resume 방지
+- `AgentContext`: stoppedByUser 플래그 추가 — stop/despawn(유저 의도) vs 크래시 구분
+- `build.gradle`: --add-opens JVM arg 추가 (리플렉션 모듈 접근)
+- `ObservationBuilder`, `AgentHttpServer`, `AgentCommand`, `PathFollower`, compat 모듈: FakePlayer → ServerPlayer 전환
+
+### 설계 판단
+
+- **ServerPlayer.tick()은 super.tick()을 호출하지 않음**: 바닐라에서 플레이어 물리는 클라이언트(LocalPlayer)가 처리. 에이전트는 클라이언트가 없으므로 baseTick + detectEquipmentUpdates + aiStep을 직접 호출하여 중력, 충돌, 장비 동기화, 아이템 픽업 구현
+- **detectEquipmentUpdates는 private**: LivingEntity의 private 메서드 — 리플렉션으로 접근. 이 메서드가 엔티티 트래커에 장비 변경을 알려서 손에 든 아이템이 다른 플레이어에게 보임
+- **useItem fallback**: 바닐라 클라이언트는 useItemOn → PASS 시 useItem을 시도. 버킷류 아이템은 Item.use()에서 동작하므로 같은 fallback 필요
+- **세션 리셋 vs 유지**: destroyForcibly(유저 stop)는 세션 유지하여 resume 가능. 진짜 크래시만 세션 리셋
+
+### 알려진 이슈
+
+- 클라이언트에서 에이전트가 약간 가라앉아 보이는 현상 (서버 Y좌표는 정상 — 엔티티 트래커 동기화 지연, TeleportEntityPacket 주기 전송으로 완화)
+- respawn 시 인벤토리 초기화 (새 AgentPlayer 인스턴스 생성 — 인벤토리 저장/복원 미구현)
+
 ## v0.3.3 — 2026-03-13 `[multi-agent, memory, infra, brain]`
 
 Multi-agent 격리 버그 3건 수정 + observation blockstate 고도화.

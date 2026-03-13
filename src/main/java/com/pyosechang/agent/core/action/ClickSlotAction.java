@@ -4,7 +4,7 @@ import com.google.gson.JsonObject;
 import net.minecraft.world.inventory.ClickType;
 import net.minecraft.world.inventory.Slot;
 import net.minecraft.world.item.ItemStack;
-import net.minecraftforge.common.util.FakePlayer;
+import net.minecraft.server.level.ServerPlayer;
 import net.minecraftforge.registries.ForgeRegistries;
 
 public class ClickSlotAction implements Action {
@@ -12,7 +12,7 @@ public class ClickSlotAction implements Action {
     public String getName() { return "click_slot"; }
 
     @Override
-    public JsonObject execute(FakePlayer agent, JsonObject params) {
+    public JsonObject execute(ServerPlayer agent, JsonObject params) {
         int slotIndex = params.get("slot").getAsInt();
         String action = params.has("click_action") ? params.get("click_action").getAsString()
                 : params.has("action_type") ? params.get("action_type").getAsString()

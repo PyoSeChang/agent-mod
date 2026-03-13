@@ -7,10 +7,9 @@ import net.minecraft.network.protocol.game.ClientboundTeleportEntityPacket;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.util.Mth;
-import net.minecraftforge.common.util.FakePlayer;
 
 /**
- * Utility for FakePlayer visual animations — look-at, arm swing, position broadcast.
+ * Utility for ServerPlayer visual animations — look-at, arm swing, position broadcast.
  * All methods broadcast packets to real players so they can see agent actions.
  */
 public final class AgentAnimation {
@@ -20,7 +19,7 @@ public final class AgentAnimation {
     /**
      * Rotate the agent to look at (x, y, z) and broadcast the rotation to all clients.
      */
-    public static void lookAt(FakePlayer agent, double x, double y, double z) {
+    public static void lookAt(ServerPlayer agent, double x, double y, double z) {
         double dx = x - agent.getX();
         double dy = y - (agent.getY() + agent.getEyeHeight());
         double dz = z - agent.getZ();
@@ -35,14 +34,14 @@ public final class AgentAnimation {
 
         // Body rotation + position
         broadcast(new ClientboundTeleportEntityPacket(agent));
-        // Head rotation (separate packet required for FakePlayer)
+        // Head rotation (separate packet required for ServerPlayer)
         broadcast(new ClientboundRotateHeadPacket(agent, (byte) (yaw * 256.0F / 360.0F)));
     }
 
     /**
      * Play the main-hand swing animation for all clients.
      */
-    public static void swingArm(FakePlayer agent) {
+    public static void swingArm(ServerPlayer agent) {
         broadcast(new ClientboundAnimatePacket(agent, 0));
     }
 

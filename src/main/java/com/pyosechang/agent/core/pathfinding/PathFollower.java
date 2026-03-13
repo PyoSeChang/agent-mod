@@ -1,7 +1,7 @@
 package com.pyosechang.agent.core.pathfinding;
 
 import net.minecraft.core.BlockPos;
-import net.minecraftforge.common.util.FakePlayer;
+import net.minecraft.server.level.ServerPlayer;
 
 import java.util.Collections;
 import java.util.List;
@@ -34,7 +34,7 @@ public class PathFollower {
     /**
      * Called every server tick to move the agent toward the next waypoint.
      */
-    public void tick(FakePlayer agent) {
+    public void tick(ServerPlayer agent) {
         if (!active || currentIndex >= path.size()) {
             active = false;
             return;

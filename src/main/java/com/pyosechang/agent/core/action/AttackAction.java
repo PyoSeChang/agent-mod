@@ -5,7 +5,7 @@ import com.pyosechang.agent.core.AgentAnimation;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.LivingEntity;
-import net.minecraftforge.common.util.FakePlayer;
+import net.minecraft.server.level.ServerPlayer;
 import net.minecraftforge.registries.ForgeRegistries;
 
 public class AttackAction implements Action {
@@ -16,7 +16,7 @@ public class AttackAction implements Action {
     }
 
     @Override
-    public JsonObject execute(FakePlayer agent, JsonObject params) {
+    public JsonObject execute(ServerPlayer agent, JsonObject params) {
         JsonObject result = new JsonObject();
 
         int entityId = params.get("entity_id").getAsInt();
