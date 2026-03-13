@@ -349,16 +349,18 @@ public class MemoryManager {
         List<MemoryEntry> merged = getMergedEntries(agentName);
         List<MemoryEntry> result = new ArrayList<>();
 
-        // 1. preference -> always
+        // 1. preference -> always (skip schedule entries)
         for (MemoryEntry e : merged) {
+            if ("schedule".equals(e.getCategory())) continue;
             if ("preference".equals(e.getCategory())) {
                 e.markLoaded();
                 result.add(e);
             }
         }
 
-        // 2. storage/facility/area -> within 32 blocks
+        // 2. storage/facility/area -> within 32 blocks (skip schedule entries)
         for (MemoryEntry e : merged) {
+            if ("schedule".equals(e.getCategory())) continue;
             String cat = e.getCategory();
             if (("storage".equals(cat) || "facility".equals(cat) || "area".equals(cat))
                     && e.getLocation() != null

@@ -9,9 +9,12 @@ import com.pyosechang.agent.core.AgentManager;
 import com.pyosechang.agent.core.action.*;
 import com.pyosechang.agent.client.ClientSetup;
 import com.pyosechang.agent.core.memory.MemoryManager;
+import com.pyosechang.agent.core.schedule.ManagerContext;
+import com.pyosechang.agent.core.schedule.ScheduleManager;
 import com.pyosechang.agent.monitor.ChatMonitor;
 import com.pyosechang.agent.monitor.TerminalIntegration;
 import com.pyosechang.agent.network.AgentHttpServer;
+import com.pyosechang.agent.runtime.ManagerRuntimeManager;
 import com.pyosechang.agent.runtime.RuntimeManager;
 import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.event.server.ServerStartingEvent;
@@ -78,20 +81,34 @@ public class AgentMod {
         // Load memory system
         MemoryManager.getInstance().load();
 
+        // Initialize schedule system
+        ScheduleManager.getInstance().init();
+        ManagerContext managerCtx = new ManagerContext();
+        ScheduleManager.getInstance().setManagerContext(managerCtx);
+
         // Start structured logger
         AgentLogger.getInstance().startSession();
 
         // Start HTTP bridge server
         httpServer.start();
         RuntimeManager.getInstance().setHttpServer(httpServer);
+        ManagerRuntimeManager.getInstance().setHttpServer(httpServer);
     }
 
     @SubscribeEvent
     public void onServerStopping(ServerStoppingEvent event) {
         LOGGER.info("Agent mod stopping");
 
-        // Save all memory
+        // Save schedules and memory
+        ScheduleManager.getInstance().save();
         MemoryManager.getInstance().save();
+
+        // Stop manager runtime
+        ManagerContext managerCtx = ScheduleManager.getInstance().getManagerContext();
+        if (managerCtx != null && managerCtx.isRuntimeRunning()) {
+            managerCtx.getRuntimeProcess().destroyForcibly();
+            managerCtx.setRuntimeProcess(null);
+        }
 
         // Stop structured logger
         AgentLogger.getInstance().endSession();

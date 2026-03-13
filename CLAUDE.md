@@ -1,6 +1,6 @@
 # agent-mod
 
-Minecraft Forge 1.20.1 AI agent mod — Multi-agent system with named FakePlayers, persona-based roles, and scoped memory. Each agent runs its own Claude Agent SDK runtime with filtered MCP tools.
+Minecraft Forge 1.20.1 AI agent mod — Multi-agent system with named FakePlayers, persona-based roles, scoped memory, and schedule-based automation. Each agent runs its own Claude Agent SDK runtime with filtered MCP tools. An Agent Manager runtime orchestrates schedules and coordinates agents.
 
 ## Build & Run
 
@@ -49,6 +49,13 @@ agent-mod/
 │   │   │   ├── MemoryManager.java    # Global + per-agent scoped memory (CRUD, JSON persistence)
 │   │   │   ├── MemoryEntry.java      # Unified data model
 │   │   │   └── MemoryLocation.java   # Point/area location model
+│   │   ├── schedule/
+│   │   │   ├── ScheduleEntry.java    # MemoryEntry wrapper for schedule data
+│   │   │   ├── ScheduleConfig.java   # Trigger config (TIME_OF_DAY, INTERVAL, OBSERVER)
+│   │   │   ├── ObserverDef.java      # Individual observer definition
+│   │   │   ├── ScheduleManager.java  # Singleton: CRUD + tick evaluation + trigger routing
+│   │   │   ├── ObserverManager.java  # Forge event handler for OBSERVER triggers
+│   │   │   └── ManagerContext.java   # Manager runtime state (no FakePlayer)
 │   │   └── pathfinding/
 │   │       ├── Pathfinder.java       # A* algorithm
 │   │       └── PathFollower.java     # Tick-based smooth movement
@@ -62,17 +69,22 @@ agent-mod/
 │   ├── network/
 │   │   └── AgentHttpServer.java      # HTTP bridge (per-agent routing, persona, memory)
 │   ├── command/
-│   │   └── AgentCommand.java         # /agent spawn|despawn|tell|list|status|stop|pause|resume
+│   │   ├── AgentCommand.java         # /agent spawn|despawn|tell|list|status|stop|pause|resume
+│   │   └── ManagerCommand.java       # /am <message> — Agent Manager command
 │   ├── compat/                       # Mod compatibility (AE2, Create)
 │   ├── monitor/                      # Chat monitoring, intervention, terminal
 │   └── runtime/
-│       └── RuntimeManager.java       # Launch/stop per-agent runtime processes
+│       ├── RuntimeManager.java       # Launch/stop per-agent runtime processes
+│       └── ManagerRuntimeManager.java # Launch/stop Agent Manager runtime
 ├── agent-runtime/                    # TypeScript (Claude Agent SDK + MCP)
 │   └── src/
 │       ├── index.ts                  # SDK query loop (maxTurns=50, per-agent session)
 │       ├── mcp-server.ts             # MCP tools → HTTP bridge (persona-filtered)
 │       ├── prompt.ts                 # Dynamic system prompt (persona injection)
-│       └── intervention.ts           # Per-agent intervention polling
+│       ├── intervention.ts           # Per-agent intervention polling
+│       ├── manager-index.ts          # Manager SDK loop (schedule orchestration)
+│       ├── manager-mcp-server.ts     # Manager MCP tools (schedule/observer/agent CRUD)
+│       └── manager-prompt.ts         # Manager system prompt
 ├── scripts/
 │   └── parse-agent-log.js           # Pretty-print JSONL logs
 └── run/.agent/
@@ -125,6 +137,37 @@ Per-agent isolation:
 Applied via: despawn → modify PERSONA.md → respawn
 ```
 
+### Schedule System
+
+```
+ScheduleManager (singleton, tick-evaluated)
+  ├── TIME_OF_DAY: fires at game time tick (0=sunrise, 6000=noon...)
+  ├── INTERVAL: fires every N server ticks
+  └── OBSERVER: fires when Forge events match at watched positions
+
+ObserverManager (Forge @SubscribeEvent)
+  ├── crop_grow, sapling_grow, block_break, block_place
+  ├── baby_spawn, entity_death, explosion
+  └── threshold-based: N observers must trigger before schedule fires
+
+Trigger flow:
+  ScheduleManager.tick() → trigger detected
+    → ManagerContext intervention (if manager running)
+    → OR direct AgentContext intervention (fallback)
+```
+
+### Agent Manager
+
+```
+/am "set up daily harvest" → ManagerRuntimeManager → manager-index.ts (Claude SDK)
+                                                        ↓
+                                                    manager-mcp-server.ts
+                                                        ↓ HTTP
+                                                    /schedule/*, /observer/*, /agent/*/tell
+```
+
+The Manager is a bodiless orchestrator — no FakePlayer, no action tools. It creates schedules, monitors triggers, and dispatches messages to agents.
+
 ## Components (for changelog tracking)
 
 | ID | Scope | Key files |
@@ -134,7 +177,8 @@ Applied via: despawn → modify PERSONA.md → respawn
 | `body` | Visual/physical presence (animation, tick) | AgentAnimation, AgentTickHandler |
 | `multi-agent` | Agent lifecycle, persona, commands, management GUI | AgentContext, AgentManager, PersonaConfig, AgentCommand |
 | `memory` | Knowledge persistence, scoping, memory GUI | MemoryManager, MemoryEntry, MemoryLocation, MemoryListScreen |
-| `infra` | Plumbing (HTTP bridge, pathfinding, runtime, logging) | AgentHttpServer, Pathfinder, RuntimeManager, AgentLogger |
+| `schedule` | Schedule system, observer events, Agent Manager | ScheduleManager, ObserverManager, ManagerContext, ManagerCommand |
+| `infra` | Plumbing (HTTP bridge, pathfinding, runtime, logging) | AgentHttpServer, Pathfinder, RuntimeManager, ManagerRuntimeManager, AgentLogger |
 
 See `docs/quality/components/index.md` for full definitions and per-component changelogs.
 
@@ -162,6 +206,7 @@ See `docs/quality/components/index.md` for full definitions and per-component ch
 /agent @<name> pause          # Pause agent (queue intervention)
 /agent @<name> resume         # Resume agent
 /agent list                   # List all spawned agents (global)
+/am <message>                 # Send message to Agent Manager (schedule orchestration)
 ```
 
 ## GUI Keybindings

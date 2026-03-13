@@ -17,7 +17,9 @@ import com.pyosechang.agent.core.action.AsyncAction;
 import com.pyosechang.agent.core.memory.MemoryEntry;
 import com.pyosechang.agent.core.memory.MemoryLocation;
 import com.pyosechang.agent.core.memory.MemoryManager;
+import com.pyosechang.agent.core.schedule.*;
 import com.pyosechang.agent.monitor.TerminalIntegration;
+import com.pyosechang.agent.runtime.RuntimeManager;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 import net.minecraft.core.BlockPos;
@@ -65,6 +67,23 @@ public class AgentHttpServer {
             httpServer.createContext("/memory/update", this::handleMemoryUpdate);
             httpServer.createContext("/memory/delete", this::handleMemoryDelete);
             httpServer.createContext("/memory/search", this::handleMemorySearch);
+
+            // Schedule endpoints
+            httpServer.createContext("/schedule/create", this::handleScheduleCreate);
+            httpServer.createContext("/schedule/update", this::handleScheduleUpdate);
+            httpServer.createContext("/schedule/delete", this::handleScheduleDelete);
+            httpServer.createContext("/schedule/list", this::handleScheduleList);
+            httpServer.createContext("/schedule/get", this::handleScheduleGet);
+
+            // Observer endpoints
+            httpServer.createContext("/observer/add", this::handleObserverAdd);
+            httpServer.createContext("/observer/remove", this::handleObserverRemove);
+            httpServer.createContext("/observer/list", this::handleObserverList);
+
+            // Manager endpoints
+            httpServer.createContext("/manager/intervention", this::handleManagerIntervention);
+            httpServer.createContext("/manager/world_time", this::handleManagerWorldTime);
+            httpServer.createContext("/manager/events", this::handleManagerEvents);
 
             httpServer.start();
             writePortFile();
@@ -125,6 +144,12 @@ public class AgentHttpServer {
         // Persona endpoint works even when agent is not spawned
         if ("/persona".equals(subpath)) {
             handlePersona(exchange, agentName);
+            return;
+        }
+
+        // Tell endpoint: sends message + launches runtime (works even if not spawned yet via spawn first)
+        if ("/tell".equals(subpath)) {
+            handleAgentTell(exchange, agentName);
             return;
         }
 
@@ -717,6 +742,376 @@ public class AgentHttpServer {
             }
             result.add("entries", arr);
             result.addProperty("count", results.size());
+            sendJson(exchange, 200, result);
+        } catch (Exception e) {
+            sendError(exchange, 500, e.getMessage());
+        }
+    }
+
+    // ============================================================
+    // Agent Tell endpoint
+    // ============================================================
+
+    private void handleAgentTell(HttpExchange exchange, String agentName) throws IOException {
+        if (!assertMethod(exchange, "POST")) return;
+        try {
+            JsonObject body = readBody(exchange);
+            String message = body.get("message").getAsString();
+
+            AgentContext ctx = AgentManager.getInstance().getAgent(agentName);
+            JsonObject result = new JsonObject();
+            result.addProperty("ok", true);
+
+            if (ctx != null) {
+                if (ctx.isRuntimeRunning()) {
+                    ctx.getInterventionQueue().add(message);
+                    result.addProperty("launched", false);
+                } else {
+                    // Need a CommandSourceStack — use server console
+                    MinecraftServer server = AgentManager.getInstance().getServer();
+                    if (server != null) {
+                        RuntimeManager.getInstance().launch(agentName, message, server.createCommandSourceStack());
+                        result.addProperty("launched", true);
+                    } else {
+                        ctx.getInterventionQueue().add(message);
+                        result.addProperty("launched", false);
+                    }
+                }
+            } else {
+                result.addProperty("ok", false);
+                result.addProperty("error", "Agent not spawned: " + agentName);
+            }
+            sendJson(exchange, 200, result);
+        } catch (Exception e) {
+            sendError(exchange, 500, e.getMessage());
+        }
+    }
+
+    // ============================================================
+    // Schedule endpoints
+    // ============================================================
+
+    private void handleScheduleCreate(HttpExchange exchange) throws IOException {
+        if (!assertMethod(exchange, "POST")) return;
+        try {
+            JsonObject body = readBody(exchange);
+            String typeStr = body.get("type").getAsString();
+            ScheduleConfig.Type type = ScheduleConfig.Type.valueOf(typeStr);
+
+            String targetAgent = body.get("target_agent").getAsString();
+            String message = body.get("message").getAsString();
+            String title = body.has("title") ? body.get("title").getAsString() : null;
+            boolean enabled = !body.has("enabled") || body.get("enabled").getAsBoolean();
+
+            // Validate target agent exists on disk
+            Path agentDir = FMLPaths.GAMEDIR.get().resolve(".agent/agents/" + targetAgent);
+            if (!Files.isDirectory(agentDir)) {
+                sendError(exchange, 400, "Target agent directory not found: " + targetAgent);
+                return;
+            }
+
+            ScheduleConfig config = new ScheduleConfig();
+            config.setType(type);
+            config.setTargetAgent(targetAgent);
+            config.setPromptMessage(message);
+            config.setEnabled(enabled);
+
+            switch (type) {
+                case TIME_OF_DAY -> {
+                    if (!body.has("time_of_day")) {
+                        sendError(exchange, 400, "time_of_day required for TIME_OF_DAY type");
+                        return;
+                    }
+                    config.setTimeOfDay(body.get("time_of_day").getAsInt());
+                    config.setRepeatDays(body.has("repeat_days") ? body.get("repeat_days").getAsInt() : 1);
+                }
+                case INTERVAL -> {
+                    if (!body.has("interval_ticks")) {
+                        sendError(exchange, 400, "interval_ticks required for INTERVAL type");
+                        return;
+                    }
+                    config.setIntervalTicks(body.get("interval_ticks").getAsInt());
+                    config.setRepeat(!body.has("repeat") || body.get("repeat").getAsBoolean());
+                }
+                case OBSERVER -> {
+                    if (!body.has("observers") || !body.has("threshold")) {
+                        sendError(exchange, 400, "observers and threshold required for OBSERVER type");
+                        return;
+                    }
+                    List<ObserverDef> observers = new ArrayList<>();
+                    for (var el : body.getAsJsonArray("observers")) {
+                        observers.add(ObserverDef.fromJson(el.getAsJsonObject()));
+                    }
+                    config.setObservers(observers);
+                    config.setThreshold(body.get("threshold").getAsInt());
+                }
+            }
+
+            MinecraftServer server = AgentManager.getInstance().getServer();
+            long currentTick = server != null ? server.getTickCount() : 0;
+
+            ScheduleEntry se = ScheduleManager.getInstance().create(title, config, currentTick);
+            JsonObject result = new JsonObject();
+            result.addProperty("ok", true);
+            result.add("entry", se.toSummaryJson());
+            sendJson(exchange, 200, result);
+        } catch (IllegalArgumentException e) {
+            sendError(exchange, 400, "Invalid schedule type: " + e.getMessage());
+        } catch (Exception e) {
+            sendError(exchange, 500, e.getMessage());
+        }
+    }
+
+    private void handleScheduleUpdate(HttpExchange exchange) throws IOException {
+        if (!assertMethod(exchange, "POST")) return;
+        try {
+            JsonObject body = readBody(exchange);
+            String id = body.get("id").getAsString();
+            ScheduleEntry se = ScheduleManager.getInstance().update(id, body);
+            if (se == null) {
+                sendError(exchange, 404, "Schedule not found: " + id);
+                return;
+            }
+            JsonObject result = new JsonObject();
+            result.addProperty("ok", true);
+            result.add("entry", se.toSummaryJson());
+            sendJson(exchange, 200, result);
+        } catch (Exception e) {
+            sendError(exchange, 500, e.getMessage());
+        }
+    }
+
+    private void handleScheduleDelete(HttpExchange exchange) throws IOException {
+        if (!assertMethod(exchange, "POST")) return;
+        try {
+            JsonObject body = readBody(exchange);
+            String id = body.get("id").getAsString();
+            boolean deleted = ScheduleManager.getInstance().delete(id);
+            JsonObject result = new JsonObject();
+            result.addProperty("ok", deleted);
+            if (!deleted) result.addProperty("error", "Schedule not found: " + id);
+            sendJson(exchange, deleted ? 200 : 404, result);
+        } catch (Exception e) {
+            sendError(exchange, 500, e.getMessage());
+        }
+    }
+
+    private void handleScheduleList(HttpExchange exchange) throws IOException {
+        if (!assertMethod(exchange, "POST")) return;
+        try {
+            JsonObject body = readBody(exchange);
+            String targetAgent = body.has("target_agent") ? body.get("target_agent").getAsString() : null;
+            boolean enabledOnly = body.has("enabled_only") && body.get("enabled_only").getAsBoolean();
+
+            List<ScheduleEntry> schedules = ScheduleManager.getInstance().list(targetAgent, enabledOnly);
+            JsonObject result = new JsonObject();
+            result.addProperty("ok", true);
+            JsonArray arr = new JsonArray();
+            for (ScheduleEntry se : schedules) {
+                arr.add(se.toSummaryJson());
+            }
+            result.add("schedules", arr);
+            result.addProperty("count", schedules.size());
+            sendJson(exchange, 200, result);
+        } catch (Exception e) {
+            sendError(exchange, 500, e.getMessage());
+        }
+    }
+
+    private void handleScheduleGet(HttpExchange exchange) throws IOException {
+        if (!assertMethod(exchange, "POST")) return;
+        try {
+            JsonObject body = readBody(exchange);
+            String id = body.get("id").getAsString();
+            ScheduleEntry se = ScheduleManager.getInstance().get(id);
+            if (se == null) {
+                sendError(exchange, 404, "Schedule not found: " + id);
+                return;
+            }
+            JsonObject result = new JsonObject();
+            result.addProperty("ok", true);
+            JsonObject schedule = se.toSummaryJson();
+            // Add observer states if OBSERVER type
+            if (se.getConfig().getType() == ScheduleConfig.Type.OBSERVER) {
+                JsonObject states = ObserverManager.getInstance().getStates(id);
+                schedule.addProperty("observers_triggered", states.get("triggered_count").getAsInt());
+                schedule.addProperty("observers_total", se.getConfig().getObservers().size());
+            }
+            result.add("schedule", schedule);
+            sendJson(exchange, 200, result);
+        } catch (Exception e) {
+            sendError(exchange, 500, e.getMessage());
+        }
+    }
+
+    // ============================================================
+    // Observer endpoints
+    // ============================================================
+
+    private void handleObserverAdd(HttpExchange exchange) throws IOException {
+        if (!assertMethod(exchange, "POST")) return;
+        try {
+            JsonObject body = readBody(exchange);
+            String scheduleId = body.get("schedule_id").getAsString();
+            ScheduleEntry se = ScheduleManager.getInstance().get(scheduleId);
+            if (se == null || se.getConfig().getType() != ScheduleConfig.Type.OBSERVER) {
+                sendError(exchange, 404, "OBSERVER schedule not found: " + scheduleId);
+                return;
+            }
+
+            List<ObserverDef> newObservers = new ArrayList<>();
+            for (var el : body.getAsJsonArray("observers")) {
+                newObservers.add(ObserverDef.fromJson(el.getAsJsonObject()));
+            }
+
+            // Add to config
+            List<ObserverDef> all = new ArrayList<>(se.getConfig().getObservers());
+            all.addAll(newObservers);
+            se.getConfig().setObservers(all);
+            se.updateConfig(se.getConfig());
+
+            // Register with ObserverManager
+            ObserverManager.getInstance().addObservers(scheduleId, newObservers);
+
+            MemoryManager.getInstance().save();
+
+            JsonObject result = new JsonObject();
+            result.addProperty("ok", true);
+            result.addProperty("total_observers", all.size());
+            sendJson(exchange, 200, result);
+        } catch (Exception e) {
+            sendError(exchange, 500, e.getMessage());
+        }
+    }
+
+    private void handleObserverRemove(HttpExchange exchange) throws IOException {
+        if (!assertMethod(exchange, "POST")) return;
+        try {
+            JsonObject body = readBody(exchange);
+            String scheduleId = body.get("schedule_id").getAsString();
+            ScheduleEntry se = ScheduleManager.getInstance().get(scheduleId);
+            if (se == null || se.getConfig().getType() != ScheduleConfig.Type.OBSERVER) {
+                sendError(exchange, 404, "OBSERVER schedule not found: " + scheduleId);
+                return;
+            }
+
+            List<BlockPos> positions = new ArrayList<>();
+            for (var el : body.getAsJsonArray("positions")) {
+                JsonObject pos = el.getAsJsonObject();
+                positions.add(new BlockPos(pos.get("x").getAsInt(), pos.get("y").getAsInt(), pos.get("z").getAsInt()));
+            }
+
+            // Remove from config
+            java.util.Set<BlockPos> posSet = new java.util.HashSet<>(positions);
+            List<ObserverDef> remaining = se.getConfig().getObservers().stream()
+                .filter(def -> !posSet.contains(def.getBlockPos()))
+                .collect(java.util.stream.Collectors.toList());
+            se.getConfig().setObservers(remaining);
+            se.updateConfig(se.getConfig());
+
+            // Unregister from ObserverManager
+            ObserverManager.getInstance().removeObservers(scheduleId, positions);
+
+            MemoryManager.getInstance().save();
+
+            JsonObject result = new JsonObject();
+            result.addProperty("ok", true);
+            result.addProperty("remaining_observers", remaining.size());
+            sendJson(exchange, 200, result);
+        } catch (Exception e) {
+            sendError(exchange, 500, e.getMessage());
+        }
+    }
+
+    private void handleObserverList(HttpExchange exchange) throws IOException {
+        if (!assertMethod(exchange, "POST")) return;
+        try {
+            JsonObject body = readBody(exchange);
+            String scheduleId = body.get("schedule_id").getAsString();
+
+            JsonObject states = ObserverManager.getInstance().getStates(scheduleId);
+            states.addProperty("ok", true);
+            sendJson(exchange, 200, states);
+        } catch (Exception e) {
+            sendError(exchange, 500, e.getMessage());
+        }
+    }
+
+    // ============================================================
+    // Manager endpoints
+    // ============================================================
+
+    private void handleManagerIntervention(HttpExchange exchange) throws IOException {
+        if (!assertMethod(exchange, "GET")) return;
+        try {
+            ManagerContext ctx = ScheduleManager.getInstance().getManagerContext();
+            JsonObject result = new JsonObject();
+            result.addProperty("ok", true);
+            if (ctx != null) {
+                String msg = ctx.getInterventionQueue().poll();
+                if (msg != null) {
+                    result.addProperty("message", msg);
+                }
+            }
+            sendJson(exchange, 200, result);
+        } catch (Exception e) {
+            sendError(exchange, 500, e.getMessage());
+        }
+    }
+
+    private void handleManagerWorldTime(HttpExchange exchange) throws IOException {
+        if (!assertMethod(exchange, "GET")) return;
+        try {
+            MinecraftServer server = AgentManager.getInstance().getServer();
+            if (server == null) {
+                sendError(exchange, 500, "Server not available");
+                return;
+            }
+            ServerLevel overworld = server.overworld();
+            long dayTime = overworld.getDayTime();
+            long tickInDay = dayTime % 24000;
+            long dayCount = dayTime / 24000;
+
+            String phase;
+            if (tickInDay < 6000) phase = "morning";
+            else if (tickInDay < 12000) phase = "noon";
+            else if (tickInDay < 13000) phase = "sunset";
+            else if (tickInDay < 18000) phase = "night";
+            else phase = "midnight";
+
+            // Convert to 12h time format
+            int hours = (int) ((tickInDay / 1000 + 6) % 24);
+            int minutes = (int) ((tickInDay % 1000) * 60 / 1000);
+            String ampm = hours >= 12 ? "PM" : "AM";
+            int h12 = hours % 12;
+            if (h12 == 0) h12 = 12;
+
+            JsonObject result = new JsonObject();
+            result.addProperty("ok", true);
+            result.addProperty("day_time", dayTime);
+            result.addProperty("time_of_day", tickInDay);
+            result.addProperty("day_count", dayCount);
+            result.addProperty("phase", phase);
+            result.addProperty("real_time_desc", String.format("Day %d, %d:%02d %s", dayCount, h12, minutes, ampm));
+            sendJson(exchange, 200, result);
+        } catch (Exception e) {
+            sendError(exchange, 500, e.getMessage());
+        }
+    }
+
+    private void handleManagerEvents(HttpExchange exchange) throws IOException {
+        if (!assertMethod(exchange, "GET")) return;
+        try {
+            JsonObject result = new JsonObject();
+            result.addProperty("ok", true);
+            JsonArray events = new JsonArray();
+            for (var entry : ObserverManager.SUPPORTED_EVENTS.entrySet()) {
+                JsonObject ev = new JsonObject();
+                ev.addProperty("type", entry.getKey());
+                ev.addProperty("description", entry.getValue());
+                events.add(ev);
+            }
+            result.add("events", events);
             sendJson(exchange, 200, result);
         } catch (Exception e) {
             sendError(exchange, 500, e.getMessage());
