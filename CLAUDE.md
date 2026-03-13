@@ -154,14 +154,14 @@ See `docs/quality/components/index.md` for full definitions and per-component ch
 ## In-Game Commands
 
 ```
-/agent spawn <name>          # Spawn agent at player position
-/agent despawn <name>        # Remove agent
-/agent tell <name> <message> # Send command to agent
-/agent list                  # List all spawned agents
-/agent status <name>         # Agent status
-/agent stop <name>           # Stop agent runtime
-/agent pause <name>          # Pause agent (queue intervention)
-/agent resume <name>         # Resume agent
+/agent @<name> spawn          # Spawn agent at player position
+/agent @<name> despawn        # Remove agent
+/agent @<name> <message>      # Send command to agent (direct message, no subcommand)
+/agent @<name> status         # Agent status
+/agent @<name> stop           # Stop agent runtime
+/agent @<name> pause          # Pause agent (queue intervention)
+/agent @<name> resume         # Resume agent
+/agent list                   # List all spawned agents (global)
 ```
 
 ## GUI Keybindings

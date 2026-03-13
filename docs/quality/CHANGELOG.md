@@ -1,5 +1,28 @@
 # CHANGELOG
 
+## v0.3.2 — 2026-03-13 `[multi-agent]`
+
+명령어 구조 변경 — `/agent <subcommand> <name>` → `/agent <name> <subcommand|message>`. 에이전트 지정을 앞에 두고, 메시지는 subcommand 없이 직접 전달.
+
+### 변경 사항
+
+**`multi-agent`**
+- `AgentCommand.java` 전면 재작성: `greedyString()` + 수동 파싱 방식으로 `@name` 패턴 구현
+  - `/agent @alex spawn`, `/agent @alex 나무 캐와` (tell 키워드 제거)
+  - `/agent list`는 글로벌 (에이전트 지정 불필요)
+  - `SUGGEST_INPUT`: `@` 입력 시 에이전트 이름 제안, 이름 선택 후 subcommand 제안
+  - `dispatch()`: `@name` 파싱 → subcommand 매칭 (spawn/despawn/status/stop/pause/resume) → 미매칭 시 tell
+- `CLAUDE.md` 명령어 문서 업데이트
+
+### 설계 판단
+
+- `word()`는 `@` 문자 미지원 → terminal-mod와 동일하게 `greedyString()` + 수동 파싱 채택
+- `@name rest` 구조를 dispatch()에서 switch로 subcommand/message 분기
+- 탭 완성 2단계: `@` 입력 시 에이전트 이름 + 이름 확정 후 subcommand 제안
+- 디스크 에이전트 폴더도 탭 완성에 포함하여, 아직 스폰되지 않은 에이전트도 `spawn` 시 이름 자동완성 가능
+
+---
+
 ## v0.3.0 — 2026-03-13 `[brain, actions, body, multi-agent, memory, infra]`
 
 멀티 에이전트 시스템 — 이름 기반 복수 FakePlayer 동시 운영, PERSONA.md 역할/도구 분리, 메모리 스코핑, 관리 GUI.
