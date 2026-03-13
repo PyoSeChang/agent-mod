@@ -438,6 +438,16 @@ public class MemoryManager {
         return obj;
     }
 
+    /**
+     * Reload all memory from disk, replacing in-memory state.
+     */
+    public synchronized void reload() {
+        entries.clear();
+        nextIdCounter = 1;
+        load();
+        LOGGER.info("Memory reloaded: {} entries", entries.size());
+    }
+
     public int size() {
         return entries.size();
     }

@@ -65,6 +65,7 @@ public class AgentHttpServer {
             httpServer.createContext("/memory/update", this::handleMemoryUpdate);
             httpServer.createContext("/memory/delete", this::handleMemoryDelete);
             httpServer.createContext("/memory/search", this::handleMemorySearch);
+            httpServer.createContext("/memory/reload", this::handleMemoryReload);
 
             httpServer.start();
             writePortFile();
@@ -141,6 +142,12 @@ public class AgentHttpServer {
             case "/intervention" -> handleAgentIntervention(exchange, ctx);
             case "/spawn" -> handleAgentSpawn(exchange);
             case "/despawn" -> handleAgentDespawn(exchange, agentName);
+            // Per-agent memory endpoints (auto-scoped to agent)
+            case "/memory/create" -> handleAgentMemoryCreate(exchange, agentName);
+            case "/memory/get" -> handleMemoryGet(exchange);
+            case "/memory/update" -> handleMemoryUpdate(exchange);
+            case "/memory/delete" -> handleMemoryDelete(exchange);
+            case "/memory/search" -> handleAgentMemorySearch(exchange, agentName);
             default -> sendError(exchange, 404, "Unknown agent endpoint: " + subpath);
         }
     }
@@ -177,15 +184,16 @@ public class AgentHttpServer {
             String actionName = body.get("action").getAsString();
             JsonObject params = body;
 
-            Action action = ActionRegistry.getInstance().get(actionName);
-            if (action == null) {
-                sendError(exchange, 404, "Unknown action: " + actionName);
-                return;
-            }
+            ActionRegistry registry = ActionRegistry.getInstance();
 
-            MinecraftServer server = AgentManager.getInstance().getServer();
-
-            if (action instanceof AsyncAction asyncAction) {
+            // Async actions get a fresh instance per execution (agent isolation)
+            if (registry.isAsync(actionName)) {
+                AsyncAction asyncAction = registry.createAsync(actionName);
+                if (asyncAction == null) {
+                    sendError(exchange, 500, "Failed to create action: " + actionName);
+                    return;
+                }
+                MinecraftServer server = AgentManager.getInstance().getServer();
                 CompletableFuture<JsonObject> bridgeFuture = new CompletableFuture<>();
                 server.execute(() -> {
                     try {
@@ -218,6 +226,13 @@ public class AgentHttpServer {
                     sendError(exchange, 504, err.get("error").getAsString());
                 }
             } else {
+                // Sync action — shared instance (stateless)
+                Action action = registry.get(actionName);
+                if (action == null) {
+                    sendError(exchange, 404, "Unknown action: " + actionName);
+                    return;
+                }
+                MinecraftServer server = AgentManager.getInstance().getServer();
                 CompletableFuture<JsonObject> future = new CompletableFuture<>();
                 server.execute(() -> {
                     try {
@@ -599,8 +614,102 @@ public class AgentHttpServer {
     }
 
     // ============================================================
-    // Memory endpoints (global scope)
+    // Per-agent memory endpoints (auto-scoped)
     // ============================================================
+
+    /**
+     * POST /agent/{name}/memory/create — auto-scoped to agent.
+     * If request body doesn't specify scope/visible_to, defaults to agent-scoped.
+     */
+    private void handleAgentMemoryCreate(HttpExchange exchange, String agentName) throws IOException {
+        if (!assertMethod(exchange, "POST")) return;
+        try {
+            JsonObject body = readBody(exchange);
+            String title = body.get("title").getAsString();
+            String description = body.has("description") ? body.get("description").getAsString() : "";
+            String content = body.has("content") ? body.get("content").getAsString() : "";
+            String category = body.has("category") ? body.get("category").getAsString() : "event";
+            List<String> tags = new ArrayList<>();
+            if (body.has("tags")) {
+                for (JsonElement el : body.getAsJsonArray("tags")) {
+                    tags.add(el.getAsString());
+                }
+            }
+
+            MemoryLocation location = null;
+            if (body.has("location") && body.get("location").isJsonObject()) {
+                location = MemoryLocation.fromJson(body.getAsJsonObject("location"));
+            }
+
+            // Auto-scope: if body specifies scope/visible_to, respect it; otherwise default to agent
+            String scope = body.has("scope") ? body.get("scope").getAsString() : "agent:" + agentName;
+            List<String> visibleTo = null;
+            if (body.has("visible_to") && body.get("visible_to").isJsonArray()) {
+                visibleTo = new ArrayList<>();
+                for (JsonElement el : body.getAsJsonArray("visible_to")) {
+                    visibleTo.add(el.getAsString());
+                }
+            } else if (!body.has("scope")) {
+                // No explicit scope or visible_to — auto-assign to this agent
+                visibleTo = List.of(agentName);
+            }
+
+            MemoryEntry entry = MemoryManager.getInstance().create(
+                title, description, content, category, tags, location, scope, visibleTo);
+
+            JsonObject result = new JsonObject();
+            result.addProperty("ok", true);
+            result.add("entry", MemoryManager.getInstance().entryToJson(entry));
+            sendJson(exchange, 200, result);
+        } catch (Exception e) {
+            sendError(exchange, 500, e.getMessage());
+        }
+    }
+
+    /**
+     * POST /agent/{name}/memory/search — auto-scoped to agent visibility.
+     */
+    private void handleAgentMemorySearch(HttpExchange exchange, String agentName) throws IOException {
+        if (!assertMethod(exchange, "POST")) return;
+        try {
+            JsonObject body = readBody(exchange);
+            String query = body.has("query") ? body.get("query").getAsString() : "";
+            String category = body.has("category") ? body.get("category").getAsString() : null;
+            // Default scope: show entries visible to this agent (global + agent-specific)
+            String scope = body.has("scope") ? body.get("scope").getAsString() : "agent:" + agentName;
+
+            List<MemoryEntry> results = MemoryManager.getInstance().search(query, category, scope);
+
+            JsonObject result = new JsonObject();
+            result.addProperty("ok", true);
+            JsonArray arr = new JsonArray();
+            for (MemoryEntry e : results) {
+                arr.add(MemoryManager.getInstance().entryToJson(e));
+            }
+            result.add("entries", arr);
+            result.addProperty("count", results.size());
+            sendJson(exchange, 200, result);
+        } catch (Exception e) {
+            sendError(exchange, 500, e.getMessage());
+        }
+    }
+
+    // ============================================================
+    // Memory endpoints (global scope — used by GUI)
+    // ============================================================
+
+    private void handleMemoryReload(HttpExchange exchange) throws IOException {
+        if (!assertMethod(exchange, "POST")) return;
+        try {
+            MemoryManager.getInstance().reload();
+            JsonObject result = new JsonObject();
+            result.addProperty("ok", true);
+            result.addProperty("count", MemoryManager.getInstance().size());
+            sendJson(exchange, 200, result);
+        } catch (Exception e) {
+            sendError(exchange, 500, e.getMessage());
+        }
+    }
 
     private void handleMemoryCreate(HttpExchange exchange) throws IOException {
         if (!assertMethod(exchange, "POST")) return;

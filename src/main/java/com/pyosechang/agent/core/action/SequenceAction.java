@@ -113,9 +113,9 @@ public class SequenceAction implements AsyncAction {
             "starting step " + (currentStepIndex + 1) + "/" + steps.size() + ": " + actionName + " params=" + stepDef.toString(),
             true, null);
 
-        if (action instanceof AsyncAction asyncAction) {
-            // Need a fresh instance for async actions to avoid state conflicts
-            AsyncAction freshAction = createFreshAsyncAction(asyncAction);
+        if (action instanceof AsyncAction) {
+            // Create a fresh instance via registry factory (agent isolation)
+            AsyncAction freshAction = ActionRegistry.getInstance().createAsync(actionName);
             if (freshAction == null) {
                 failStep(currentStepIndex, actionName, "Failed to create action instance");
                 return;
@@ -221,19 +221,6 @@ public class SequenceAction implements AsyncAction {
 
     @Override
     public boolean isActive() { return active; }
-
-    /**
-     * Create a fresh instance of an AsyncAction to avoid state conflicts
-     * when running inside a sequence.
-     */
-    private AsyncAction createFreshAsyncAction(AsyncAction template) {
-        try {
-            return template.getClass().getDeclaredConstructor().newInstance();
-        } catch (Exception e) {
-            LOGGER.error("Failed to create fresh instance of {}: {}", template.getName(), e.getMessage());
-            return null;
-        }
-    }
 
     private CompletableFuture<JsonObject> failImmediately(String error) {
         JsonObject result = new JsonObject();

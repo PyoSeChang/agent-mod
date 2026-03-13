@@ -10,6 +10,7 @@ import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.block.state.properties.Property;
 import net.minecraftforge.common.util.FakePlayer;
 import net.minecraftforge.registries.ForgeRegistries;
 
@@ -119,6 +120,17 @@ public class ObservationBuilder {
             var blockKey = ForgeRegistries.BLOCKS.getKey(entry.state().getBlock());
             blockObj.addProperty("block_id", blockKey != null ? blockKey.toString() : "unknown");
             blockObj.addProperty("block_name", entry.state().getBlock().getName().getString());
+
+            // Include blockstate properties if present (age, type, facing, lit, etc.)
+            var properties = entry.state().getValues();
+            if (!properties.isEmpty()) {
+                JsonObject stateObj = new JsonObject();
+                for (Map.Entry<Property<?>, Comparable<?>> prop : properties.entrySet()) {
+                    stateObj.addProperty(prop.getKey().getName(), prop.getValue().toString());
+                }
+                blockObj.add("state", stateObj);
+            }
+
             blocks.add(blockObj);
         }
 

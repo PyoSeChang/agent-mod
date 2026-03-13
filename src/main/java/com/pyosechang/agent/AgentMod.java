@@ -48,10 +48,16 @@ public class AgentMod {
 
         // Register all actions
         ActionRegistry reg = ActionRegistry.getInstance();
-        reg.register(new MoveToAction());
-        reg.register(new MineBlockAction());
-        reg.register(new PlaceBlockAction());
 
+        // Async actions — fresh instance created per execution (stateful)
+        reg.registerAsync(MoveToAction.class);
+        reg.registerAsync(MineBlockAction.class);
+        reg.registerAsync(MineAreaAction.class);
+        reg.registerAsync(UseItemOnAreaAction.class);
+        reg.registerAsync(SequenceAction.class);
+
+        // Sync actions — shared instances (stateless)
+        reg.register(new PlaceBlockAction());
         reg.register(new DropItemAction());
         reg.register(new EquipAction());
         reg.register(new AttackAction());
@@ -63,9 +69,6 @@ public class AgentMod {
         reg.register(new CraftAction());
         reg.register(new SmeltAction());
         reg.register(new UseItemOnAction());
-        reg.register(new MineAreaAction());
-        reg.register(new UseItemOnAreaAction());
-        reg.register(new SequenceAction());
 
         // Initialize monitoring
         ChatMonitor.setServer(event.getServer());
