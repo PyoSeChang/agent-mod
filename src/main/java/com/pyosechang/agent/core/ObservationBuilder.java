@@ -19,21 +19,19 @@ import java.util.Map;
 
 public class ObservationBuilder {
 
-    /**
-     * Build a full observation JSON for the agent.
-     * Overload for backward compatibility.
-     */
+    /** Backward-compatible overloads */
     public static JsonObject build(FakePlayer agent) {
-        return build(agent, null);
+        return build(agent, null, null);
+    }
+
+    public static JsonObject build(FakePlayer agent, ServerLevel level) {
+        return build(agent, level, null);
     }
 
     /**
      * Build a full observation JSON for the agent including world data.
-     *
-     * @param agent the fake player agent
-     * @param level the server level (nullable for backward compat)
      */
-    public static JsonObject build(FakePlayer agent, ServerLevel level) {
+    public static JsonObject build(FakePlayer agent, ServerLevel level, String agentName) {
         JsonObject obs = new JsonObject();
 
         // Position
@@ -65,7 +63,15 @@ public class ObservationBuilder {
 
         // Memory system
         if (MemoryManager.getInstance().size() > 0) {
-            obs.add("memories", buildMemories(agent));
+            obs.add("memories", buildMemories(agent, agentName));
+        }
+
+        // Acquaintances (from persona)
+        if (agentName != null) {
+            AgentContext ctx = AgentManager.getInstance().getAgent(agentName);
+            if (ctx != null && !ctx.getPersona().getAcquaintances().isEmpty()) {
+                obs.add("acquaintances", buildAcquaintances(agent, ctx));
+            }
         }
 
         return obs;
@@ -160,16 +166,44 @@ public class ObservationBuilder {
     }
 
     /**
+     * Build acquaintances section — name, description, spawned status, distance.
+     */
+    private static JsonArray buildAcquaintances(FakePlayer agent, AgentContext ctx) {
+        JsonArray arr = new JsonArray();
+        for (PersonaConfig.Acquaintance acq : ctx.getPersona().getAcquaintances()) {
+            JsonObject obj = new JsonObject();
+            obj.addProperty("name", acq.name());
+            obj.addProperty("description", acq.description());
+
+            AgentContext acqCtx = AgentManager.getInstance().getAgent(acq.name());
+            if (acqCtx != null) {
+                obj.addProperty("spawned", true);
+                double dist = agent.distanceTo(acqCtx.getFakePlayer());
+                obj.addProperty("distance", Math.round(dist * 10.0) / 10.0);
+                JsonObject pos = new JsonObject();
+                pos.addProperty("x", acqCtx.getFakePlayer().getX());
+                pos.addProperty("y", acqCtx.getFakePlayer().getY());
+                pos.addProperty("z", acqCtx.getFakePlayer().getZ());
+                obj.add("position", pos);
+            } else {
+                obj.addProperty("spawned", false);
+            }
+            arr.add(obj);
+        }
+        return arr;
+    }
+
+    /**
      * Build memories section with title_index (distance-sorted) and auto_loaded (content included).
      */
-    private static JsonObject buildMemories(FakePlayer agent) {
+    private static JsonObject buildMemories(FakePlayer agent, String agentName) {
         JsonObject memories = new JsonObject();
         double ax = agent.getX(), ay = agent.getY(), az = agent.getZ();
         MemoryManager mm = MemoryManager.getInstance();
 
-        // Title index: all entries sorted by distance
+        // Title index: all entries (global + agent) sorted by distance
         JsonArray titleIndex = new JsonArray();
-        List<Map.Entry<MemoryEntry, Double>> indexed = mm.getAllForTitleIndex(ax, ay, az);
+        List<Map.Entry<MemoryEntry, Double>> indexed = mm.getAllForTitleIndex(ax, ay, az, agentName);
         for (Map.Entry<MemoryEntry, Double> pair : indexed) {
             titleIndex.add(mm.entryToSummaryJson(pair.getKey(), pair.getValue()));
         }
@@ -177,7 +211,7 @@ public class ObservationBuilder {
 
         // Auto-loaded: entries with full content based on category rules
         JsonArray autoLoaded = new JsonArray();
-        List<MemoryEntry> loaded = mm.getAutoLoadContent(ax, ay, az);
+        List<MemoryEntry> loaded = mm.getAutoLoadContent(ax, ay, az, agentName);
         for (MemoryEntry e : loaded) {
             autoLoaded.add(mm.entryToAutoLoadJson(e));
         }

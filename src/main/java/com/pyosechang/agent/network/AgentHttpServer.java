@@ -6,8 +6,9 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import com.mojang.logging.LogUtils;
+import com.pyosechang.agent.core.AgentContext;
 import com.pyosechang.agent.core.AgentLogger;
-import com.pyosechang.agent.core.FakePlayerManager;
+import com.pyosechang.agent.core.AgentManager;
 import com.pyosechang.agent.core.ObservationBuilder;
 import com.pyosechang.agent.core.action.Action;
 import com.pyosechang.agent.core.action.ActionRegistry;
@@ -16,7 +17,6 @@ import com.pyosechang.agent.core.action.AsyncAction;
 import com.pyosechang.agent.core.memory.MemoryEntry;
 import com.pyosechang.agent.core.memory.MemoryLocation;
 import com.pyosechang.agent.core.memory.MemoryManager;
-import com.pyosechang.agent.monitor.InterventionQueue;
 import com.pyosechang.agent.monitor.TerminalIntegration;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
@@ -49,16 +49,17 @@ public class AgentHttpServer {
             port = httpServer.getAddress().getPort();
             httpServer.setExecutor(null);
 
-            httpServer.createContext("/spawn", this::handleSpawn);
-            httpServer.createContext("/despawn", this::handleDespawn);
-            httpServer.createContext("/status", this::handleStatus);
-            httpServer.createContext("/observation", this::handleObservation);
-            httpServer.createContext("/action", this::handleAction);
+            // Per-agent endpoints: /agent/{name}/...
+            httpServer.createContext("/agent/", this::handleAgentRoute);
+
+            // Global endpoints
+            httpServer.createContext("/agents/list", this::handleAgentsFullList);
+            httpServer.createContext("/agents/delete", this::handleAgentsDelete);
+            httpServer.createContext("/agents", this::handleAgentsList);
             httpServer.createContext("/actions", this::handleActions);
             httpServer.createContext("/log", this::handleLog);
-            httpServer.createContext("/intervention", this::handleIntervention);
 
-            // Memory endpoints
+            // Memory endpoints (global scope)
             httpServer.createContext("/memory/create", this::handleMemoryCreate);
             httpServer.createContext("/memory/get", this::handleMemoryGet);
             httpServer.createContext("/memory/update", this::handleMemoryUpdate);
@@ -79,7 +80,6 @@ public class AgentHttpServer {
             httpServer = null;
             LOGGER.info("Agent HTTP server stopped");
         }
-        // Clean up port file
         try {
             Path portFile = FMLPaths.GAMEDIR.get().resolve(".agent/bridge-server.json");
             Files.deleteIfExists(portFile);
@@ -105,134 +105,71 @@ public class AgentHttpServer {
         }
     }
 
-    private void handleSpawn(HttpExchange exchange) throws IOException {
-        if (!assertMethod(exchange, "POST")) return;
-        try {
-            JsonObject body = readBody(exchange);
-            int x = body.get("x").getAsInt();
-            int y = body.get("y").getAsInt();
-            int z = body.get("z").getAsInt();
+    // ============================================================
+    // Per-agent routing: /agent/{name}/{subpath}
+    // ============================================================
 
-            MinecraftServer server = FakePlayerManager.getInstance().getServer();
-            CompletableFuture<JsonObject> future = new CompletableFuture<>();
-            server.execute(() -> {
-                try {
-                    ServerLevel level = server.overworld();
-                    boolean ok = FakePlayerManager.getInstance().spawn(level, new BlockPos(x, y, z));
-                    JsonObject result = new JsonObject();
-                    result.addProperty("ok", ok);
-                    if (!ok) result.addProperty("error", "Agent already spawned");
-                    future.complete(result);
-                } catch (Exception e) {
-                    JsonObject err = new JsonObject();
-                    err.addProperty("ok", false);
-                    err.addProperty("error", e.getMessage());
-                    future.complete(err);
-                }
-            });
-            JsonObject result = future.get(5, TimeUnit.SECONDS);
-            sendJson(exchange, 200, result);
-        } catch (Exception e) {
-            sendError(exchange, 500, e.getMessage());
+    private void handleAgentRoute(HttpExchange exchange) throws IOException {
+        String path = exchange.getRequestURI().getPath();
+        // Parse: /agent/{name}/{subpath...}
+        // path starts with "/agent/"
+        String remainder = path.substring("/agent/".length());
+        int slashIdx = remainder.indexOf('/');
+        if (slashIdx < 0) {
+            sendError(exchange, 400, "Missing sub-path. Use /agent/{name}/{action}");
+            return;
+        }
+        String agentName = remainder.substring(0, slashIdx);
+        String subpath = remainder.substring(slashIdx); // includes leading /
+
+        // Persona endpoint works even when agent is not spawned
+        if ("/persona".equals(subpath)) {
+            handlePersona(exchange, agentName);
+            return;
+        }
+
+        AgentContext ctx = AgentManager.getInstance().getAgent(agentName);
+        if (ctx == null) {
+            sendError(exchange, 404, "Agent not found: " + agentName);
+            return;
+        }
+
+        switch (subpath) {
+            case "/observation" -> handleAgentObservation(exchange, ctx);
+            case "/action" -> handleAgentAction(exchange, ctx);
+            case "/status" -> handleAgentStatus(exchange, ctx);
+            case "/intervention" -> handleAgentIntervention(exchange, ctx);
+            case "/spawn" -> handleAgentSpawn(exchange);
+            case "/despawn" -> handleAgentDespawn(exchange, agentName);
+            default -> sendError(exchange, 404, "Unknown agent endpoint: " + subpath);
         }
     }
 
-    private void handleDespawn(HttpExchange exchange) throws IOException {
-        if (!assertMethod(exchange, "POST")) return;
-        try {
-            MinecraftServer server = FakePlayerManager.getInstance().getServer();
-            CompletableFuture<JsonObject> future = new CompletableFuture<>();
-            server.execute(() -> {
-                try {
-                    boolean ok = FakePlayerManager.getInstance().despawn();
-                    JsonObject result = new JsonObject();
-                    result.addProperty("ok", ok);
-                    if (!ok) result.addProperty("error", "Agent not spawned");
-                    future.complete(result);
-                } catch (Exception e) {
-                    JsonObject err = new JsonObject();
-                    err.addProperty("ok", false);
-                    err.addProperty("error", e.getMessage());
-                    future.complete(err);
-                }
-            });
-            JsonObject result = future.get(5, TimeUnit.SECONDS);
-            sendJson(exchange, 200, result);
-        } catch (Exception e) {
-            sendError(exchange, 500, e.getMessage());
-        }
-    }
-
-    private void handleStatus(HttpExchange exchange) throws IOException {
+    private void handleAgentObservation(HttpExchange exchange, AgentContext ctx) throws IOException {
         if (!assertMethod(exchange, "GET")) return;
         try {
-            MinecraftServer server = FakePlayerManager.getInstance().getServer();
+            MinecraftServer server = AgentManager.getInstance().getServer();
             CompletableFuture<JsonObject> future = new CompletableFuture<>();
             server.execute(() -> {
                 try {
-                    JsonObject result = new JsonObject();
-                    boolean spawned = FakePlayerManager.getInstance().isSpawned();
-                    result.addProperty("spawned", spawned);
-                    if (spawned) {
-                        FakePlayer agent = FakePlayerManager.getInstance().getAgent();
-                        JsonObject pos = new JsonObject();
-                        pos.addProperty("x", agent.getX());
-                        pos.addProperty("y", agent.getY());
-                        pos.addProperty("z", agent.getZ());
-                        result.add("position", pos);
-                    }
-                    future.complete(result);
-                } catch (Exception e) {
-                    JsonObject err = new JsonObject();
-                    err.addProperty("ok", false);
-                    err.addProperty("error", e.getMessage());
-                    future.complete(err);
-                }
-            });
-            JsonObject result = future.get(5, TimeUnit.SECONDS);
-            sendJson(exchange, 200, result);
-        } catch (Exception e) {
-            sendError(exchange, 500, e.getMessage());
-        }
-    }
-
-    private void handleObservation(HttpExchange exchange) throws IOException {
-        if (!assertMethod(exchange, "GET")) return;
-        try {
-            MinecraftServer server = FakePlayerManager.getInstance().getServer();
-            CompletableFuture<JsonObject> future = new CompletableFuture<>();
-            server.execute(() -> {
-                try {
-                    FakePlayer agent = FakePlayerManager.getInstance().getAgent();
-                    if (agent == null) {
-                        JsonObject err = new JsonObject();
-                        err.addProperty("ok", false);
-                        err.addProperty("error", "Agent not spawned");
-                        future.complete(err);
-                        return;
-                    }
+                    FakePlayer agent = ctx.getFakePlayer();
                     ServerLevel level = (ServerLevel) agent.level();
-                    JsonObject obs = ObservationBuilder.build(agent, level);
-                    // Add mod compat observation data
+                    JsonObject obs = ObservationBuilder.build(agent, level, ctx.getName());
                     com.pyosechang.agent.compat.CompatRegistry.getInstance()
                         .extendObservation(obs, agent);
                     obs.addProperty("ok", true);
                     future.complete(obs);
                 } catch (Exception e) {
-                    JsonObject err = new JsonObject();
-                    err.addProperty("ok", false);
-                    err.addProperty("error", e.getMessage());
-                    future.complete(err);
+                    future.complete(errorJson(e.getMessage()));
                 }
             });
-            JsonObject result = future.get(5, TimeUnit.SECONDS);
-            sendJson(exchange, 200, result);
+            sendJson(exchange, 200, future.get(5, TimeUnit.SECONDS));
         } catch (Exception e) {
             sendError(exchange, 500, e.getMessage());
         }
     }
 
-    private void handleAction(HttpExchange exchange) throws IOException {
+    private void handleAgentAction(HttpExchange exchange, AgentContext ctx) throws IOException {
         if (!assertMethod(exchange, "POST")) return;
         long startMs = System.currentTimeMillis();
         try {
@@ -246,39 +183,24 @@ public class AgentHttpServer {
                 return;
             }
 
-            MinecraftServer server = FakePlayerManager.getInstance().getServer();
+            MinecraftServer server = AgentManager.getInstance().getServer();
 
             if (action instanceof AsyncAction asyncAction) {
-                // Async action: start on server thread, await future with longer timeout
                 CompletableFuture<JsonObject> bridgeFuture = new CompletableFuture<>();
                 server.execute(() -> {
                     try {
-                        FakePlayer agent = FakePlayerManager.getInstance().getAgent();
-                        if (agent == null) {
-                            JsonObject err = new JsonObject();
-                            err.addProperty("ok", false);
-                            err.addProperty("error", "Agent not spawned");
-                            bridgeFuture.complete(err);
-                            return;
-                        }
+                        FakePlayer agent = ctx.getFakePlayer();
                         CompletableFuture<JsonObject> actionFuture =
-                            ActiveActionManager.getInstance().startAction(asyncAction, agent, params);
-                        // Chain the action future to the bridge future
+                            ctx.getActionManager().startAction(asyncAction, agent, params);
                         actionFuture.whenComplete((result, ex) -> {
                             if (ex != null) {
-                                JsonObject err = new JsonObject();
-                                err.addProperty("ok", false);
-                                err.addProperty("error", ex.getMessage());
-                                bridgeFuture.complete(err);
+                                bridgeFuture.complete(errorJson(ex.getMessage()));
                             } else {
                                 bridgeFuture.complete(result);
                             }
                         });
                     } catch (Exception e) {
-                        JsonObject err = new JsonObject();
-                        err.addProperty("ok", false);
-                        err.addProperty("error", e.getMessage());
-                        bridgeFuture.complete(err);
+                        bridgeFuture.complete(errorJson(e.getMessage()));
                     }
                 });
                 try {
@@ -287,8 +209,7 @@ public class AgentHttpServer {
                     AgentLogger.getInstance().logAction(actionName, params, result, System.currentTimeMillis() - startMs);
                     sendJson(exchange, 200, result);
                 } catch (java.util.concurrent.TimeoutException te) {
-                    // Timeout — cancel the action and report error
-                    ActiveActionManager.getInstance().cancel();
+                    ctx.getActionManager().cancel();
                     long timeoutSec = asyncAction.getTimeoutMs() / 1000;
                     JsonObject err = new JsonObject();
                     err.addProperty("ok", false);
@@ -297,31 +218,350 @@ public class AgentHttpServer {
                     sendError(exchange, 504, err.get("error").getAsString());
                 }
             } else {
-                // Sync action: existing 5-second pattern
                 CompletableFuture<JsonObject> future = new CompletableFuture<>();
                 server.execute(() -> {
                     try {
-                        FakePlayer agent = FakePlayerManager.getInstance().getAgent();
-                        if (agent == null) {
-                            JsonObject err = new JsonObject();
-                            err.addProperty("ok", false);
-                            err.addProperty("error", "Agent not spawned");
-                            future.complete(err);
-                            return;
-                        }
+                        FakePlayer agent = ctx.getFakePlayer();
                         JsonObject result = action.execute(agent, params);
                         future.complete(result);
                     } catch (Exception e) {
-                        JsonObject err = new JsonObject();
-                        err.addProperty("ok", false);
-                        err.addProperty("error", e.getMessage());
-                        future.complete(err);
+                        future.complete(errorJson(e.getMessage()));
                     }
                 });
                 JsonObject result = future.get(5, TimeUnit.SECONDS);
                 AgentLogger.getInstance().logAction(actionName, params, result, System.currentTimeMillis() - startMs);
                 sendJson(exchange, 200, result);
             }
+        } catch (Exception e) {
+            sendError(exchange, 500, e.getMessage());
+        }
+    }
+
+    private void handleAgentStatus(HttpExchange exchange, AgentContext ctx) throws IOException {
+        if (!assertMethod(exchange, "GET")) return;
+        try {
+            JsonObject result = new JsonObject();
+            result.addProperty("ok", true);
+            result.addProperty("name", ctx.getName());
+            result.addProperty("spawned", true);
+            result.addProperty("runtime_running", ctx.isRuntimeRunning());
+            FakePlayer agent = ctx.getFakePlayer();
+            JsonObject pos = new JsonObject();
+            pos.addProperty("x", agent.getX());
+            pos.addProperty("y", agent.getY());
+            pos.addProperty("z", agent.getZ());
+            result.add("position", pos);
+            sendJson(exchange, 200, result);
+        } catch (Exception e) {
+            sendError(exchange, 500, e.getMessage());
+        }
+    }
+
+    private void handleAgentIntervention(HttpExchange exchange, AgentContext ctx) throws IOException {
+        if (!assertMethod(exchange, "GET")) return;
+        try {
+            JsonObject result = new JsonObject();
+            String msg = ctx.getInterventionQueue().poll();
+            if (msg != null) {
+                result.addProperty("message", msg);
+            }
+            result.addProperty("ok", true);
+            sendJson(exchange, 200, result);
+        } catch (Exception e) {
+            sendError(exchange, 500, e.getMessage());
+        }
+    }
+
+    private void handleAgentSpawn(HttpExchange exchange) throws IOException {
+        if (!assertMethod(exchange, "POST")) return;
+        try {
+            JsonObject body = readBody(exchange);
+            String name = body.get("name").getAsString();
+            int x = body.get("x").getAsInt();
+            int y = body.get("y").getAsInt();
+            int z = body.get("z").getAsInt();
+
+            MinecraftServer server = AgentManager.getInstance().getServer();
+            CompletableFuture<JsonObject> future = new CompletableFuture<>();
+            server.execute(() -> {
+                try {
+                    ServerLevel level = server.overworld();
+                    boolean ok = AgentManager.getInstance().spawn(name, level, new BlockPos(x, y, z));
+                    JsonObject result = new JsonObject();
+                    result.addProperty("ok", ok);
+                    if (!ok) result.addProperty("error", "Agent already spawned: " + name);
+                    future.complete(result);
+                } catch (Exception e) {
+                    future.complete(errorJson(e.getMessage()));
+                }
+            });
+            sendJson(exchange, 200, future.get(5, TimeUnit.SECONDS));
+        } catch (Exception e) {
+            sendError(exchange, 500, e.getMessage());
+        }
+    }
+
+    private void handleAgentDespawn(HttpExchange exchange, String agentName) throws IOException {
+        if (!assertMethod(exchange, "POST")) return;
+        try {
+            MinecraftServer server = AgentManager.getInstance().getServer();
+            CompletableFuture<JsonObject> future = new CompletableFuture<>();
+            server.execute(() -> {
+                try {
+                    boolean ok = AgentManager.getInstance().despawn(agentName);
+                    JsonObject result = new JsonObject();
+                    result.addProperty("ok", ok);
+                    if (!ok) result.addProperty("error", "Agent not spawned: " + agentName);
+                    future.complete(result);
+                } catch (Exception e) {
+                    future.complete(errorJson(e.getMessage()));
+                }
+            });
+            sendJson(exchange, 200, future.get(5, TimeUnit.SECONDS));
+        } catch (Exception e) {
+            sendError(exchange, 500, e.getMessage());
+        }
+    }
+
+    // ============================================================
+    // Global endpoints
+    // ============================================================
+
+    private void handleAgentsList(HttpExchange exchange) throws IOException {
+        if (!assertMethod(exchange, "GET")) return;
+        try {
+            JsonObject result = new JsonObject();
+            result.addProperty("ok", true);
+            JsonArray agents = new JsonArray();
+            for (AgentContext ctx : AgentManager.getInstance().getAllAgents()) {
+                JsonObject a = new JsonObject();
+                a.addProperty("name", ctx.getName());
+                a.addProperty("runtime_running", ctx.isRuntimeRunning());
+                FakePlayer fp = ctx.getFakePlayer();
+                JsonObject pos = new JsonObject();
+                pos.addProperty("x", fp.getX());
+                pos.addProperty("y", fp.getY());
+                pos.addProperty("z", fp.getZ());
+                a.add("position", pos);
+                agents.add(a);
+            }
+            result.add("agents", agents);
+            sendJson(exchange, 200, result);
+        } catch (Exception e) {
+            sendError(exchange, 500, e.getMessage());
+        }
+    }
+
+    /**
+     * GET /agents/list — scan .agent/agents/ directory + spawn status for each.
+     * Returns both defined (on disk) and spawned agents.
+     */
+    private void handleAgentsFullList(HttpExchange exchange) throws IOException {
+        if (!assertMethod(exchange, "GET")) return;
+        try {
+            JsonObject result = new JsonObject();
+            result.addProperty("ok", true);
+            JsonArray agents = new JsonArray();
+
+            // Scan filesystem for defined agents
+            Path agentsDir = FMLPaths.GAMEDIR.get().resolve(".agent/agents");
+            java.util.Set<String> seen = new java.util.HashSet<>();
+
+            if (Files.isDirectory(agentsDir)) {
+                try (var dirs = Files.list(agentsDir)) {
+                    dirs.filter(Files::isDirectory).forEach(dir -> {
+                        String name = dir.getFileName().toString();
+                        seen.add(name);
+                        JsonObject a = new JsonObject();
+                        a.addProperty("name", name);
+                        a.addProperty("defined", true);
+
+                        AgentContext ctx = AgentManager.getInstance().getAgent(name);
+                        a.addProperty("spawned", ctx != null);
+                        if (ctx != null) {
+                            a.addProperty("runtime_running", ctx.isRuntimeRunning());
+                            FakePlayer fp = ctx.getFakePlayer();
+                            JsonObject pos = new JsonObject();
+                            pos.addProperty("x", fp.getX());
+                            pos.addProperty("y", fp.getY());
+                            pos.addProperty("z", fp.getZ());
+                            a.add("position", pos);
+                        }
+
+                        // Read persona summary
+                        Path personaFile = dir.resolve("PERSONA.md");
+                        if (Files.exists(personaFile)) {
+                            a.addProperty("has_persona", true);
+                            com.pyosechang.agent.core.PersonaConfig pc =
+                                com.pyosechang.agent.core.PersonaConfig.parse(name, personaFile);
+                            a.addProperty("role", pc.getRole());
+                        } else {
+                            a.addProperty("has_persona", false);
+                        }
+
+                        agents.add(a);
+                    });
+                }
+            }
+
+            // Also include spawned agents that don't have a directory yet
+            for (AgentContext ctx : AgentManager.getInstance().getAllAgents()) {
+                if (!seen.contains(ctx.getName())) {
+                    JsonObject a = new JsonObject();
+                    a.addProperty("name", ctx.getName());
+                    a.addProperty("defined", false);
+                    a.addProperty("spawned", true);
+                    a.addProperty("runtime_running", ctx.isRuntimeRunning());
+                    a.addProperty("role", ctx.getPersona().getRole());
+                    FakePlayer fp = ctx.getFakePlayer();
+                    JsonObject pos = new JsonObject();
+                    pos.addProperty("x", fp.getX());
+                    pos.addProperty("y", fp.getY());
+                    pos.addProperty("z", fp.getZ());
+                    a.add("position", pos);
+                    agents.add(a);
+                }
+            }
+
+            result.add("agents", agents);
+            sendJson(exchange, 200, result);
+        } catch (Exception e) {
+            sendError(exchange, 500, e.getMessage());
+        }
+    }
+
+    /**
+     * GET/POST /agent/{name}/persona — read or write PERSONA.md
+     */
+    private void handlePersona(HttpExchange exchange, String agentName) throws IOException {
+        Path personaFile = FMLPaths.GAMEDIR.get().resolve(".agent/agents/" + agentName + "/PERSONA.md");
+
+        if ("GET".equalsIgnoreCase(exchange.getRequestMethod())) {
+            try {
+                JsonObject result = new JsonObject();
+                result.addProperty("ok", true);
+                result.addProperty("name", agentName);
+
+                com.pyosechang.agent.core.PersonaConfig pc = Files.exists(personaFile)
+                    ? com.pyosechang.agent.core.PersonaConfig.parse(agentName, personaFile)
+                    : com.pyosechang.agent.core.PersonaConfig.defaultPersona(agentName);
+
+                result.addProperty("role", pc.getRole());
+                result.addProperty("personality", pc.getPersonality());
+                JsonArray tools = new JsonArray();
+                for (String t : pc.getTools()) tools.add(t);
+                result.add("tools", tools);
+                JsonArray acquaintances = new JsonArray();
+                for (var acq : pc.getAcquaintances()) {
+                    JsonObject a = new JsonObject();
+                    a.addProperty("name", acq.name());
+                    a.addProperty("description", acq.description());
+                    acquaintances.add(a);
+                }
+                result.add("acquaintances", acquaintances);
+                result.addProperty("raw", pc.getRawContent());
+
+                // Include all available actions for tool selection UI
+                JsonArray allActions = new JsonArray();
+                for (String name : ActionRegistry.getInstance().listNames()) {
+                    allActions.add(name);
+                }
+                result.add("available_tools", allActions);
+
+                AgentContext ctx = AgentManager.getInstance().getAgent(agentName);
+                result.addProperty("spawned", ctx != null);
+
+                sendJson(exchange, 200, result);
+            } catch (Exception e) {
+                sendError(exchange, 500, e.getMessage());
+            }
+        } else if ("POST".equalsIgnoreCase(exchange.getRequestMethod())) {
+            try {
+                JsonObject body = readBody(exchange);
+                String role = body.has("role") ? body.get("role").getAsString() : "General-purpose agent";
+                String personality = body.has("personality") ? body.get("personality").getAsString() : "Helpful and efficient.";
+                List<String> tools = new ArrayList<>();
+                if (body.has("tools") && body.get("tools").isJsonArray()) {
+                    for (JsonElement el : body.getAsJsonArray("tools")) {
+                        tools.add(el.getAsString());
+                    }
+                }
+
+                // Parse acquaintances
+                List<String[]> acquaintances = new ArrayList<>();
+                if (body.has("acquaintances") && body.get("acquaintances").isJsonArray()) {
+                    for (JsonElement el : body.getAsJsonArray("acquaintances")) {
+                        JsonObject acq = el.getAsJsonObject();
+                        String acqName = acq.get("name").getAsString();
+                        String acqDesc = acq.has("description") ? acq.get("description").getAsString() : "";
+                        acquaintances.add(new String[]{acqName, acqDesc});
+                    }
+                }
+
+                // Build PERSONA.md content
+                StringBuilder md = new StringBuilder();
+                md.append("# ").append(agentName).append("\n\n");
+                md.append("## Role\n").append(role).append("\n\n");
+                md.append("## Personality\n").append(personality).append("\n\n");
+                md.append("## Tools\n");
+                for (String t : tools) {
+                    md.append("- ").append(t).append("\n");
+                }
+                if (!acquaintances.isEmpty()) {
+                    md.append("\n## Acquaintances\n");
+                    for (String[] acq : acquaintances) {
+                        md.append("- ").append(acq[0]);
+                        if (!acq[1].isEmpty()) md.append(": ").append(acq[1]);
+                        md.append("\n");
+                    }
+                }
+
+                // Ensure directory exists
+                Files.createDirectories(personaFile.getParent());
+                Files.writeString(personaFile, md.toString(), StandardCharsets.UTF_8);
+
+                JsonObject result = new JsonObject();
+                result.addProperty("ok", true);
+                result.addProperty("message", "Persona saved. Despawn and respawn to apply changes.");
+                sendJson(exchange, 200, result);
+            } catch (Exception e) {
+                sendError(exchange, 500, e.getMessage());
+            }
+        } else {
+            sendError(exchange, 405, "Method not allowed. Use GET or POST.");
+        }
+    }
+
+    /**
+     * POST /agents/delete — delete agent directory (only if not spawned).
+     */
+    private void handleAgentsDelete(HttpExchange exchange) throws IOException {
+        if (!assertMethod(exchange, "POST")) return;
+        try {
+            JsonObject body = readBody(exchange);
+            String name = body.get("name").getAsString();
+
+            if (AgentManager.getInstance().isSpawned(name)) {
+                sendError(exchange, 400, "Cannot delete spawned agent. Despawn first.");
+                return;
+            }
+
+            Path agentDir = FMLPaths.GAMEDIR.get().resolve(".agent/agents/" + name);
+            JsonObject result = new JsonObject();
+            if (Files.isDirectory(agentDir)) {
+                // Delete directory contents
+                try (var walk = Files.walk(agentDir)) {
+                    walk.sorted(java.util.Comparator.reverseOrder())
+                        .forEach(p -> {
+                            try { Files.delete(p); } catch (IOException ignored) {}
+                        });
+                }
+                result.addProperty("ok", true);
+            } else {
+                result.addProperty("ok", false);
+                result.addProperty("error", "Agent directory not found: " + name);
+            }
+            sendJson(exchange, 200, result);
         } catch (Exception e) {
             sendError(exchange, 500, e.getMessage());
         }
@@ -358,22 +598,9 @@ public class AgentHttpServer {
         }
     }
 
-    private void handleIntervention(HttpExchange exchange) throws IOException {
-        if (!assertMethod(exchange, "GET")) return;
-        try {
-            JsonObject result = new JsonObject();
-            String msg = InterventionQueue.getInstance().poll();
-            if (msg != null) {
-                result.addProperty("message", msg);
-            }
-            result.addProperty("ok", true);
-            sendJson(exchange, 200, result);
-        } catch (Exception e) {
-            sendError(exchange, 500, e.getMessage());
-        }
-    }
-
-    // --- Memory endpoints ---
+    // ============================================================
+    // Memory endpoints (global scope)
+    // ============================================================
 
     private void handleMemoryCreate(HttpExchange exchange) throws IOException {
         if (!assertMethod(exchange, "POST")) return;
@@ -393,18 +620,20 @@ public class AgentHttpServer {
             MemoryLocation location = null;
             if (body.has("location") && body.get("location").isJsonObject()) {
                 location = MemoryLocation.fromJson(body.getAsJsonObject("location"));
-            } else {
-                // Default: agent current position + radius 5
-                FakePlayer agent = FakePlayerManager.getInstance().getAgent();
-                if (agent != null) {
-                    location = MemoryLocation.point(agent.getX(), agent.getY(), agent.getZ(), 5);
-                }
             }
 
             String scope = body.has("scope") ? body.get("scope").getAsString() : "global";
 
+            List<String> visibleTo = null;
+            if (body.has("visible_to") && body.get("visible_to").isJsonArray()) {
+                visibleTo = new ArrayList<>();
+                for (JsonElement el : body.getAsJsonArray("visible_to")) {
+                    visibleTo.add(el.getAsString());
+                }
+            }
+
             MemoryEntry entry = MemoryManager.getInstance().create(
-                title, description, content, category, tags, location, scope);
+                title, description, content, category, tags, location, scope, visibleTo);
 
             JsonObject result = new JsonObject();
             result.addProperty("ok", true);
@@ -476,7 +705,9 @@ public class AgentHttpServer {
             JsonObject body = readBody(exchange);
             String query = body.has("query") ? body.get("query").getAsString() : "";
             String category = body.has("category") ? body.get("category").getAsString() : null;
-            List<MemoryEntry> results = MemoryManager.getInstance().search(query, category);
+            String scope = body.has("scope") ? body.get("scope").getAsString() : "global";
+
+            List<MemoryEntry> results = MemoryManager.getInstance().search(query, category, scope);
 
             JsonObject result = new JsonObject();
             result.addProperty("ok", true);
@@ -492,7 +723,9 @@ public class AgentHttpServer {
         }
     }
 
-    // --- Utility methods ---
+    // ============================================================
+    // Utility methods
+    // ============================================================
 
     private boolean assertMethod(HttpExchange exchange, String method) throws IOException {
         if (!exchange.getRequestMethod().equalsIgnoreCase(method)) {
@@ -519,9 +752,13 @@ public class AgentHttpServer {
     }
 
     private void sendError(HttpExchange exchange, int code, String message) throws IOException {
+        sendJson(exchange, code, errorJson(message));
+    }
+
+    private JsonObject errorJson(String message) {
         JsonObject err = new JsonObject();
         err.addProperty("ok", false);
         err.addProperty("error", message != null ? message : "Unknown error");
-        sendJson(exchange, code, err);
+        return err;
     }
 }

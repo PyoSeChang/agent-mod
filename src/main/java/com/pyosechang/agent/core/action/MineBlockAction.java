@@ -18,6 +18,7 @@ public class MineBlockAction implements AsyncAction {
 
     private CompletableFuture<JsonObject> future;
     private boolean active = false;
+    private FakePlayer cachedAgent;
     private BlockPos targetPos;
     private float destroyProgress; // per-tick progress
     private int currentTick;
@@ -31,6 +32,7 @@ public class MineBlockAction implements AsyncAction {
     public CompletableFuture<JsonObject> start(FakePlayer agent, JsonObject params) {
         future = new CompletableFuture<>();
         active = false;
+        cachedAgent = agent;
         currentTick = 0;
 
         int x = params.get("x").getAsInt();
@@ -120,8 +122,7 @@ public class MineBlockAction implements AsyncAction {
         if (active) {
             active = false;
             if (targetPos != null) {
-                FakePlayer agent = com.pyosechang.agent.core.FakePlayerManager.getInstance().getAgent();
-                if (agent != null && agent.level() instanceof ServerLevel level) {
+                if (cachedAgent != null && cachedAgent.level() instanceof ServerLevel level) {
                     cleanupAnimation(level);
                 }
             }
@@ -165,9 +166,7 @@ public class MineBlockAction implements AsyncAction {
     private void cleanupAnimation(ServerLevel level) {
         // -1 clears the break animation
         level.destroyBlockProgress(
-            com.pyosechang.agent.core.FakePlayerManager.getInstance().getAgent() != null
-                ? com.pyosechang.agent.core.FakePlayerManager.getInstance().getAgent().getId()
-                : 0,
+            cachedAgent != null ? cachedAgent.getId() : 0,
             targetPos, -1);
     }
 

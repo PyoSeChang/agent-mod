@@ -2,11 +2,12 @@ package com.pyosechang.agent.monitor;
 
 import java.util.concurrent.ConcurrentLinkedQueue;
 
+/**
+ * Per-agent intervention message queue.
+ * Each AgentContext holds its own instance.
+ */
 public class InterventionQueue {
-    private static final InterventionQueue INSTANCE = new InterventionQueue();
     private final ConcurrentLinkedQueue<String> queue = new ConcurrentLinkedQueue<>();
-
-    public static InterventionQueue getInstance() { return INSTANCE; }
 
     public void add(String message) { queue.add(message); }
     public String poll() { return queue.poll(); }

@@ -10,6 +10,7 @@ const bridgePort = process.env.AGENT_BRIDGE_PORT!;
 const message = process.env.AGENT_MESSAGE!;
 const sessionId = process.env.AGENT_SESSION_ID!;
 const isResume = process.env.AGENT_IS_RESUME === "true";
+const agentName = process.env.AGENT_NAME || "Agent";
 
 if (!bridgePort || !message) {
   console.error("Missing required env vars: AGENT_BRIDGE_PORT, AGENT_MESSAGE");
@@ -51,6 +52,7 @@ async function main() {
         args: [mcpServerPath],
         env: {
           AGENT_BRIDGE_URL: bridgeUrl,
+          AGENT_NAME: agentName,
         },
       },
     },

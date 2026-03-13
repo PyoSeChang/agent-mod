@@ -47,6 +47,30 @@ public class BridgeClient {
         cachedPort = -1;
     }
 
+    public static CompletableFuture<JsonObject> get(String path) {
+        int port = getPort();
+        if (port < 0) {
+            return CompletableFuture.completedFuture(errorJson("Bridge server not available"));
+        }
+        try {
+            HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create("http://localhost:" + port + path))
+                .GET()
+                .build();
+            return HTTP.sendAsync(request, HttpResponse.BodyHandlers.ofString())
+                .thenApply(resp -> {
+                    try {
+                        return JsonParser.parseString(resp.body()).getAsJsonObject();
+                    } catch (Exception e) {
+                        return errorJson("Invalid response: " + resp.body());
+                    }
+                })
+                .exceptionally(e -> errorJson(e.getMessage()));
+        } catch (Exception e) {
+            return CompletableFuture.completedFuture(errorJson(e.getMessage()));
+        }
+    }
+
     public static CompletableFuture<JsonObject> post(String path, JsonObject body) {
         int port = getPort();
         if (port < 0) {

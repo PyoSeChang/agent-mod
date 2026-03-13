@@ -27,6 +27,7 @@ public class MineAreaAction implements AsyncAction {
 
     private CompletableFuture<JsonObject> future;
     private boolean active = false;
+    private FakePlayer cachedAgent;
 
     // Block queue (top-to-bottom for natural mining order)
     private List<BlockPos> blocks;
@@ -63,6 +64,7 @@ public class MineAreaAction implements AsyncAction {
     @Override
     public CompletableFuture<JsonObject> start(FakePlayer agent, JsonObject params) {
         future = new CompletableFuture<>();
+        cachedAgent = agent;
         active = false;
 
         int x1 = params.get("x1").getAsInt();
@@ -352,9 +354,8 @@ public class MineAreaAction implements AsyncAction {
             active = false;
             pathFollower.cancel();
             if (miningTarget != null) {
-                FakePlayer agent = com.pyosechang.agent.core.FakePlayerManager.getInstance().getAgent();
-                if (agent != null && agent.level() instanceof ServerLevel level) {
-                    level.destroyBlockProgress(agent.getId(), miningTarget, -1);
+                if (cachedAgent != null && cachedAgent.level() instanceof ServerLevel level) {
+                    level.destroyBlockProgress(cachedAgent.getId(), miningTarget, -1);
                 }
             }
             if (future != null && !future.isDone()) {

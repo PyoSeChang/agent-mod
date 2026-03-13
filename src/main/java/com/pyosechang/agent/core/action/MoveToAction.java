@@ -2,7 +2,7 @@ package com.pyosechang.agent.core.action;
 
 import com.google.gson.JsonObject;
 import com.pyosechang.agent.core.AgentAnimation;
-import com.pyosechang.agent.core.FakePlayerManager;
+import com.pyosechang.agent.core.AgentManager;
 import com.pyosechang.agent.core.pathfinding.PathFollower;
 import com.pyosechang.agent.core.pathfinding.Pathfinder;
 import net.minecraft.core.BlockPos;
@@ -166,7 +166,7 @@ public class MoveToAction implements AsyncAction {
 
     private void broadcastPosition(FakePlayer agent) {
         ClientboundTeleportEntityPacket packet = new ClientboundTeleportEntityPacket(agent);
-        var server = FakePlayerManager.getInstance().getServer();
+        var server = AgentManager.getInstance().getServer();
         if (server != null) {
             for (ServerPlayer player : server.getPlayerList().getPlayers()) {
                 player.connection.send(packet);

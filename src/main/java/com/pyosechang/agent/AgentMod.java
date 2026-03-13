@@ -5,7 +5,7 @@ import com.pyosechang.agent.compat.CompatRegistry;
 import com.pyosechang.agent.compat.ae2.AE2Compat;
 import com.pyosechang.agent.compat.create.CreateCompat;
 import com.pyosechang.agent.core.AgentLogger;
-import com.pyosechang.agent.core.FakePlayerManager;
+import com.pyosechang.agent.core.AgentManager;
 import com.pyosechang.agent.core.action.*;
 import com.pyosechang.agent.client.ClientSetup;
 import com.pyosechang.agent.core.memory.MemoryManager;
@@ -44,7 +44,7 @@ public class AgentMod {
         LOGGER.info("Agent mod loaded");
 
         // Set server reference
-        FakePlayerManager.getInstance().setServer(event.getServer());
+        AgentManager.getInstance().setServer(event.getServer());
 
         // Register all actions
         ActionRegistry reg = ActionRegistry.getInstance();
@@ -90,27 +90,27 @@ public class AgentMod {
     public void onServerStopping(ServerStoppingEvent event) {
         LOGGER.info("Agent mod stopping");
 
-        // Save memory system
+        // Save all memory
         MemoryManager.getInstance().save();
 
         // Stop structured logger
         AgentLogger.getInstance().endSession();
 
-        // Stop runtime if running and reset session
-        RuntimeManager.getInstance().stop();
-        RuntimeManager.getInstance().resetSession();
+        // Stop all runtimes and reset sessions
+        RuntimeManager.getInstance().stopAll();
+        RuntimeManager.getInstance().resetAllSessions();
 
         // Stop HTTP server
         httpServer.stop();
 
-        // Despawn agent
-        FakePlayerManager.getInstance().despawn();
+        // Despawn all agents
+        AgentManager.getInstance().despawnAll();
     }
 
     @SubscribeEvent
     public void onServerStopped(ServerStoppedEvent event) {
         // Clear server reference
-        FakePlayerManager.getInstance().setServer(null);
+        AgentManager.getInstance().setServer(null);
         LOGGER.info("Agent mod stopped");
     }
 }

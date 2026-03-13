@@ -1,6 +1,6 @@
 # agent-mod
 
-Minecraft Forge 1.20.1 AI agent mod — FakePlayer that executes natural language commands via Claude Agent SDK.
+Minecraft Forge 1.20.1 AI agent mod — Multi-agent system with named FakePlayers, persona-based roles, and scoped memory. Each agent runs its own Claude Agent SDK runtime with filtered MCP tools.
 
 ## Build & Run
 
@@ -17,15 +17,17 @@ agent-mod/
 ├── src/main/java/com/pyosechang/agent/
 │   ├── AgentMod.java                 # Entry point: action registration, lifecycle
 │   ├── core/
-│   │   ├── AgentAnimation.java       # lookAt/swingArm packet broadcast
-│   │   ├── AgentLogger.java          # Structured JSONL logger (per-session)
-│   │   ├── AgentTickHandler.java     # Server tick: action tick + auto item pickup
-│   │   ├── FakePlayerManager.java    # FakePlayer spawn/despawn + visibility packets
-│   │   ├── ObservationBuilder.java   # Build state observation JSON
+│   │   ├── AgentContext.java         # Per-agent state bundle (FakePlayer, ActionManager, Persona, etc.)
+│   │   ├── AgentManager.java        # Multi-agent manager (spawn/despawn/routing)
+│   │   ├── PersonaConfig.java       # PERSONA.md parser (role, personality, tools)
+│   │   ├── AgentAnimation.java      # lookAt/swingArm packet broadcast
+│   │   ├── AgentLogger.java         # Structured JSONL logger (per-session)
+│   │   ├── AgentTickHandler.java    # Server tick: all agents action tick + auto item pickup
+│   │   ├── ObservationBuilder.java  # Build state observation JSON (with scoped memory)
 │   │   ├── action/
 │   │   │   ├── Action.java           # Sync action interface
 │   │   │   ├── AsyncAction.java      # Multi-tick action interface (+ getTimeoutMs)
-│   │   │   ├── ActiveActionManager.java  # Singleton: one active async action
+│   │   │   ├── ActiveActionManager.java  # Per-agent: one active async action
 │   │   │   ├── ActionRegistry.java   # Name → Action mapping
 │   │   │   ├── MoveToAction.java     # A* pathfinding + tick walk (async)
 │   │   │   ├── MineBlockAction.java  # Tick-based mining with crack animation (async)
@@ -38,44 +40,89 @@ agent-mod/
 │   │   │   ├── AttackAction.java     # Attack entity (sync)
 │   │   │   ├── InteractAction.java   # Right-click entity (sync)
 │   │   │   ├── PlaceBlockAction.java # Place block from inventory (sync)
-│   │   │   ├── PickupItemsAction.java # Pick up nearby items (sync)
 │   │   │   ├── DropItemAction.java   # Drop item (sync)
 │   │   │   ├── OpenContainerAction.java  # Open chest/furnace (sync)
 │   │   │   ├── ClickSlotAction.java  # Click container slot (sync)
 │   │   │   ├── CloseContainerAction.java # Close container (sync)
 │   │   │   └── SmeltAction.java      # Smelting recipe lookup (sync)
+│   │   ├── memory/
+│   │   │   ├── MemoryManager.java    # Global + per-agent scoped memory (CRUD, JSON persistence)
+│   │   │   ├── MemoryEntry.java      # Unified data model
+│   │   │   └── MemoryLocation.java   # Point/area location model
 │   │   └── pathfinding/
 │   │       ├── Pathfinder.java       # A* algorithm
 │   │       └── PathFollower.java     # Tick-based smooth movement
+│   ├── client/
+│   │   ├── ClientSetup.java          # Keybindings (M=memory, G=agents)
+│   │   ├── BridgeClient.java         # Async HTTP client (GUI ↔ server)
+│   │   ├── AgentManagementScreen.java # Agent CRUD + persona editor (G key)
+│   │   ├── MemoryListScreen.java     # Memory list with scope/category tabs (M key)
+│   │   ├── MemoryEditScreen.java     # Memory editor with scope selector
+│   │   └── AreaMarkHandler.java      # World block area selection
 │   ├── network/
-│   │   └── AgentHttpServer.java      # HTTP bridge (localhost:0, dynamic timeout)
-│   ├── command/                      # In-game commands
+│   │   └── AgentHttpServer.java      # HTTP bridge (per-agent routing, persona, memory)
+│   ├── command/
+│   │   └── AgentCommand.java         # /agent spawn|despawn|tell|list|status|stop|pause|resume
 │   ├── compat/                       # Mod compatibility (AE2, Create)
 │   ├── monitor/                      # Chat monitoring, intervention, terminal
 │   └── runtime/
-│       └── RuntimeManager.java       # Launch/stop agent-runtime process
+│       └── RuntimeManager.java       # Launch/stop per-agent runtime processes
 ├── agent-runtime/                    # TypeScript (Claude Agent SDK + MCP)
 │   └── src/
-│       ├── index.ts                  # SDK query loop (maxTurns=50)
-│       ├── mcp-server.ts             # 25 MCP tools → HTTP bridge
-│       └── prompt.ts                 # System prompt for Claude
+│       ├── index.ts                  # SDK query loop (maxTurns=50, per-agent session)
+│       ├── mcp-server.ts             # MCP tools → HTTP bridge (persona-filtered)
+│       ├── prompt.ts                 # Dynamic system prompt (persona injection)
+│       └── intervention.ts           # Per-agent intervention polling
 ├── scripts/
 │   └── parse-agent-log.js           # Pretty-print JSONL logs
 └── run/.agent/
     ├── bridge-server.json            # HTTP port file (auto-generated)
+    ├── memory.json                   # Global memory
+    ├── agents/
+    │   └── {name}/
+    │       ├── PERSONA.md            # Agent persona (role, personality, tools)
+    │       └── memory.json           # Agent-specific memory
     └── logs/                         # Session logs (YYYY-MM-DD_HHmmss.jsonl)
 ```
 
 ## Architecture
 
 ```
-[Player command] → RuntimeManager → agent-runtime (Claude SDK)
+[Player command] → /agent tell <name> <msg>
+                      ↓
+                  RuntimeManager → agent-runtime (Claude SDK, per-agent process)
                                       ↓
-                                    MCP Server (25 tools)
+                                    MCP Server (persona-filtered tools)
                                       ↓
-                                    HTTP Bridge (AgentHttpServer)
+                                    HTTP Bridge (/agent/{name}/...)
                                       ↓
-                                    Action System → FakePlayer
+                                    AgentContext → ActionManager → FakePlayer
+```
+
+### Multi-Agent Flow
+
+```
+AgentManager (ConcurrentHashMap<String, AgentContext>)
+  ├── "alex" → AgentContext { FakePlayer, ActionManager, PersonaConfig, InterventionQueue }
+  ├── "steve" → AgentContext { FakePlayer, ActionManager, PersonaConfig, InterventionQueue }
+  └── ...
+
+Per-agent isolation:
+  - Each agent has its own ActionManager (no shared singleton)
+  - Each agent runs its own Node.js runtime process
+  - MCP tool list filtered per PERSONA.md
+  - Memory: global (shared) + agent-specific (private)
+```
+
+### Persona System
+
+```
+.agent/agents/{name}/PERSONA.md
+  ## Role        → injected into system prompt
+  ## Personality  → injected into system prompt
+  ## Tools        → filters MCP tool registration (empty = all allowed)
+
+Applied via: despawn → modify PERSONA.md → respawn
 ```
 
 ## Components (for changelog tracking)
@@ -84,10 +131,12 @@ agent-mod/
 |----|-------|-----------|
 | `brain` | Claude's decisions (prompt, tool descriptions, config) | prompt.ts, mcp-server.ts, index.ts |
 | `actions` | Action implementations (what happens) | core/action/*.java |
-| `body` | Visual/physical presence (animation, pickup) | AgentAnimation, AgentTickHandler, FakePlayerManager |
-| `infra` | Plumbing (timeouts, pathfinding, bridge) | AsyncAction, AgentHttpServer, Pathfinder |
+| `body` | Visual/physical presence (animation, tick) | AgentAnimation, AgentTickHandler |
+| `multi-agent` | Agent lifecycle, persona, commands, management GUI | AgentContext, AgentManager, PersonaConfig, AgentCommand |
+| `memory` | Knowledge persistence, scoping, memory GUI | MemoryManager, MemoryEntry, MemoryLocation, MemoryListScreen |
+| `infra` | Plumbing (HTTP bridge, pathfinding, runtime, logging) | AgentHttpServer, Pathfinder, RuntimeManager, AgentLogger |
 
-See `docs/quality/components.md` for full definitions.
+See `docs/quality/components/index.md` for full definitions and per-component changelogs.
 
 ## Key Actions
 
@@ -102,15 +151,38 @@ See `docs/quality/components.md` for full definitions.
 | `craft` | sync | Real crafting (ingredient consume, batch count) |
 | `equip` | sync | Equip item to slot |
 
+## In-Game Commands
+
+```
+/agent spawn <name>          # Spawn agent at player position
+/agent despawn <name>        # Remove agent
+/agent tell <name> <message> # Send command to agent
+/agent list                  # List all spawned agents
+/agent status <name>         # Agent status
+/agent stop <name>           # Stop agent runtime
+/agent pause <name>          # Pause agent (queue intervention)
+/agent resume <name>         # Resume agent
+```
+
+## GUI Keybindings
+
+| Key | Screen | Features |
+|-----|--------|----------|
+| `G` | Agent Management | Agent list, persona editor, tool checkboxes, spawn/despawn/create/delete |
+| `M` | Memory Browser | Scope tabs (All/Global/per-agent), category tabs, search, create/edit/delete |
+
 ## Conventions
 
 - Forge 1.20.1 (forge 47.2.0), Java 17, Gradle 8.1.1
 - Package root: `com.pyosechang.agent`
 - agent-runtime: Node.js, TypeScript, ESM
 - HTTP bridge on localhost:0 (auto port), port file at `run/.agent/bridge-server.json`
+- Per-agent HTTP routing: `/agent/{name}/observation`, `/agent/{name}/action`, etc.
 - All async actions support dynamic timeout via `getTimeoutMs()`
 - All actions broadcast lookAt/swingArm animations
-- Auto item pickup every tick (2-block radius)
+- Auto item pickup every tick (2-block radius) for all agents
+- Agent persona files at `run/.agent/agents/{name}/PERSONA.md`
+- Memory: global at `run/.agent/memory.json`, per-agent at `run/.agent/agents/{name}/memory.json`
 
 ## Logging
 

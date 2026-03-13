@@ -1,0 +1,369 @@
+# CHANGELOG
+
+## v0.3.0 — 2026-03-13 `[brain, actions, body, multi-agent, memory, infra]`
+
+멀티 에이전트 시스템 — 이름 기반 복수 FakePlayer 동시 운영, PERSONA.md 역할/도구 분리, 메모리 스코핑, 관리 GUI.
+
+### 변경 사항
+
+**Phase 1: Multi FakePlayer + 독립 명령**
+
+**`body`**
+- `AgentContext.java` 신규: 에이전트별 상태 번들 (FakePlayer, ActionManager, InterventionQueue, PersonaConfig, 런타임 프로세스, 세션ID)
+- `AgentManager.java` 신규: `ConcurrentHashMap<String, AgentContext>` 기반 멀티 에이전트 관리. `FakePlayerManager` 대체
+- `AgentTickHandler`: 단일 에이전트 → `AgentManager.getAllAgents()` 순회
+- `AgentAnimation`: AgentManager 참조로 전환
+
+**`actions`**
+- `ActiveActionManager`: 싱글턴 제거 → 에이전트별 인스턴스
+- `MineBlockAction`, `MineAreaAction`: `cachedAgent` 패턴으로 cancel() 시 참조 유지
+
+**`infra`**
+- `AgentHttpServer`: Per-agent 라우팅 (`/agent/{name}/observation`, `/agent/{name}/action`, `/agent/{name}/intervention`, `/agent/{name}/status`)
+- `RuntimeManager`: 싱글 프로세스 → AgentContext 기반, `AGENT_NAME` env var 추가
+- `InterventionQueue`: 싱글턴 제거 → 에이전트별 인스턴스
+- `AgentCommand`: 전면 재작성 — `/agent spawn <name>`, `/agent despawn <name>`, `/agent tell <name> <msg>`, `/agent list`, `/agent status`, `/agent stop`, `/agent pause`, `/agent resume`. 탭 완성 지원
+
+**Phase 2: Persona System**
+
+**`brain`**
+- `PersonaConfig.java` 신규: `.agent/agents/{name}/PERSONA.md` 파서 (`## Role`, `## Personality`, `## Tools`)
+- `prompt.ts`: 정적 `SYSTEM_PROMPT` → `buildSystemPrompt()` 동적 생성. 페르소나 내용 + 에이전트 이름 주입
+- `mcp-server.ts`: `AGENT_TOOLS` env var 기반 도구 필터링. `isAllowed()` 게이트로 조건부 등록 (15개 도구). `get_observation`, 메모리 도구, `execute_sequence`는 항상 등록
+- `intervention.ts`, `index.ts`: per-agent URL 프리픽스 적용
+
+**`infra`**
+- `RuntimeManager`: `AGENT_PERSONA_CONTENT`, `AGENT_TOOLS` env var 추가 전달
+- `AgentManager.spawn()`: PERSONA.md 자동 로드 → PersonaConfig 생성
+
+**Phase 3: Memory Scoping**
+
+**`infra`**
+- `MemoryManager`: 전면 재작성. `globalEntries` ← `.agent/memory.json`, `agentEntries: Map<String, List>` ← `.agent/agents/{name}/memory.json`
+  - `loadAgent(name)`, `unloadAgent(name)`, `saveAgent(name)`, `saveAll()`
+  - `search(query, category, scope)` — scope-aware 검색
+  - `searchAll()` — 전체 스코프 검색
+- `AgentHttpServer`: `/agent/{name}/memory/*` → scope=`agent:name`, `/memory/search` scope 파라미터 지원
+- `ObservationBuilder`: `build(agent, level, agentName)` — 글로벌+에이전트 메모리 병합
+
+**Phase 4: Agent Management GUI**
+
+**`infra`**
+- `AgentManagementScreen.java` 신규: 좌측 에이전트 목록 (스폰 상태 표시) + 우측 페르소나 편집 (역할/성격/도구 체크박스)
+- `BridgeClient`: `get()` 메서드 추가
+- `ClientSetup`: G키 바인딩 추가
+- `AgentHttpServer`: `GET /agents/list` (디렉토리 스캔 + 스폰 상태), `GET/POST /agent/{name}/persona`, `POST /agents/delete`
+
+**Phase 5: Memory & Agent GUI Overhaul**
+
+**`infra`**
+- `DropdownWidget.java` 신규: Minecraft 1.20.1 커스텀 드롭다운 위젯 (Z=400 오버레이 렌더링, 항목 색상/구분선, 외부 클릭 닫기)
+- `MemoryListScreen`: 전면 재작성 — 카테고리 드롭다운 + 에이전트 스코프 드롭다운 + 검색, scope badge에 에이전트 이름 전체 나열, ID 표시 제거
+- `MemoryEditScreen`: 전면 재작성 — 2컬럼 레이아웃 (좌: Title/Desc/Content, 우: Category 드롭다운/Tags/Visibility/Location), 에이전트 선택 오버레이 팝업 (Z=400), 선택된 에이전트 이름 나열, m:n visibility (visible_to), 하단 버튼 고정
+- `AgentManagementScreen`: 전면 재작성 — 3컬럼 (좌: 에이전트 목록+검색, 중: Name/Role/Personality, 우: Tools 체크리스트), 수평+수직 중앙 정렬, 이름 편집/rename 지원
+
+**Acquaintance System (지인)**
+
+**`brain`**
+- `PersonaConfig`: `Acquaintance` record (name, description) + `## Acquaintances` 섹션 파싱 (`- name: description` 형식)
+- `ObservationBuilder`: `acquaintances` 섹션 Observation에 주입 — name, description, spawned 여부, distance, position
+- 향후 협업/채팅 기능의 기반 — 에이전트가 누구와 소통 가능한지 인지
+
+**`infra`**
+- `AgentHttpServer`: persona GET/POST에 acquaintances 배열 추가, PERSONA.md `## Acquaintances` 섹션으로 직렬화
+- `AgentManagementScreen`: 지인 목록 렌더링 + [x] 제거 + 추가 입력 (name + description + [+] 버튼)
+
+### 설계 판단
+
+- **싱글턴 → 인스턴스 패턴**: ActiveActionManager, InterventionQueue를 AgentContext가 각자 보유. 에이전트 간 액션/개입 완전 격리
+- **도구 필터링 = 에이전트 정체성**: MCP tool list 자체가 에이전트의 인가이자 역할. PERSONA.md의 `## Tools`로 정의, despawn→respawn으로 적용
+- **메모리 스코핑**: 글로벌(상자 위치 등) + 에이전트별(개인 작업 큐 등) 분리. Observation에는 병합 주입
+- **GUI 우선**: 코드/파일 편집 없이 인게임에서 에이전트 생성/삭제/페르소나 편집/메모리 관리 가능
+- **지인 = skill-like**: name+description으로 정의, observation에 주입. 모든 에이전트가 서로 아는 것이 아니라 PERSONA.md에 명시된 관계만 인지. 향후 협업/채팅 시 "누구에게 요청할 수 있는지" 판단 근거
+
+### 파일 변경 요약
+
+| 구분 | 파일 |
+|------|------|
+| 신규 (6) | `AgentContext`, `AgentManager`, `PersonaConfig` (with Acquaintance), `AgentManagementScreen`, `DropdownWidget`, `BridgeClient.get()` |
+| 전면 재작성 (6) | `AgentCommand`, `AgentHttpServer`, `MemoryManager`, `MemoryListScreen`, `MemoryEditScreen`, `mcp-server.ts` |
+| 주요 수정 (13) | `ActiveActionManager`, `InterventionQueue`, `AgentTickHandler`, `RuntimeManager`, `AgentMod`, `AgentAnimation`, `MineBlockAction`, `MineAreaAction`, `ObservationBuilder` (acquaintances 주입), `prompt.ts`, `intervention.ts`, `index.ts` |
+| GUI 수정 (2) | `ClientSetup`, `AgentManagementScreen` |
+| 미사용 잔존 (1) | `FakePlayerManager` — 삭제 대상 |
+
+---
+
+## v0.2.5 — 2026-03-12 `[brain, infra]`
+
+통합 메모리 시스템 — Brain이 장소, 시설, 절차적 지식을 세션 간 유지. GUI 편집기 + Observation 자동 주입.
+
+### 변경 사항
+
+**`brain`**
+- MCP 도구 5개 추가: `remember`, `update_memory`, `forget`, `recall`, `search_memory`
+- `mcp-server.ts`: bridgeFetch → `/memory/*` 엔드포인트 연결
+- 시스템 프롬프트 Memory system 섹션 추가:
+  ```
+  - Observations include a "memories" section with title_index + auto_loaded
+  - Use recall(id) to read full content of a memory in title_index
+  - Use remember() to save important locations, facilities, resources, preferences
+  - Use update_memory() when information changes
+  - Always remember: storage, facilities, areas, events, preferences, skills
+  - When arriving at known location, check if memory is still accurate
+  ```
+- `ObservationBuilder`: `memories` 섹션 추가 — `title_index` (전체 거리순) + `auto_loaded` (카테고리별 content 주입)
+
+**`infra`**
+- `MemoryEntry`: 통합 데이터 모델 (id, title, description, content, category, tags, location, scope, timestamps)
+- `MemoryLocation`: point/area 위치 모델 — distanceTo(), isWithinRange()
+- `MemoryManager`: 싱글턴 CRUD + JSON persistence (atomic write) + CopyOnWriteArrayList (스레드 안전)
+  - Auto-load 규칙: preference=항상, storage/facility/area=32블록 이내, event=최신 5개
+  - ID: 순차 `m001`, `m002` (ergonomic)
+  - 저장: `.agent/memory.json`
+- `AgentHttpServer`: `/memory/create`, `/memory/get`, `/memory/update`, `/memory/delete`, `/memory/search` 엔드포인트
+- `AgentMod`: 서버 시작 시 `MemoryManager.load()`, 종료 시 `save()`
+- GUI: `M` 키바인드 → `MemoryListScreen` (카테고리 탭 + 검색 + 거리순 리스트) + `MemoryEditScreen` (편집/생성/삭제)
+- `BridgeClient`: GUI → HTTP bridge 비동기 통신
+- `AreaMarkHandler`: 월드에서 블록 2개 우클릭으로 영역 코너 지정
+
+### 설계 판단
+
+Claude Code의 skill 시스템과 동일 메커니즘 채용: title+description 항상 로드 → 카테고리별 auto-load 규칙으로 content 주입.
+Brain이 스스로 `remember` 호출하여 지식 축적, 이후 세션에서 observation 통해 자동 recall.
+GUI는 플레이어가 직접 메모리 편집/검증할 수 있도록 Screen 기반 구현.
+
+### 테스트 결과
+
+[v0.2.5 / 2026-03-12 실행 기록](runs/v0.2.5/2026-03-12.md) 참조.
+
+- Brain이 `remember` 자발 호출: 상자(m001, storage), 농장(m002, area) 기억 생성
+- `update_memory`로 상자 내용 갱신 확인
+- memory.json 저장/로드 정상 동작
+- auto-load (loadedAt 갱신) 확인
+
+### 발견 이슈
+
+- [ ] `I-014`: 씨앗 부족 감지 미비 — 64개로 81칸 심기 시도, item=empty 후에도 계속 순회. 조기 중단 필요
+- [ ] `I-015`: move_to y좌표 추정 실패 — y=63 반복 시도 후 y=65에서 성공. 지형 높이 자동 보정 또는 observation 활용 필요
+- [ ] `I-016`: MemoryLocation area 타입에서 미사용 필드(x, z, radius)가 0으로 직렬화 — JSON 노이즈
+
+---
+
+## v0.2.4 — 2026-03-12 `[brain, infra]`
+
+세션 컨텍스트 유지 — 같은 서버 세션 내 명령 간 대화 히스토리 resume.
+
+### 변경 사항
+
+**`brain`**
+- `index.ts`: 첫 명령은 `sessionId`로 세션 생성 + 전체 시스템 프롬프트. 이후 명령은 `resume: sessionId`로 이전 대화 이어가기 + 명령만 전달
+- SDK `persistSession` (기본 true) 활용 — 트랜스크립트 자동 저장, 별도 구현 불필요
+
+**`infra`**
+- `RuntimeManager`: 서버 시작 시 UUID `sessionId` 생성, 모든 명령에 `AGENT_SESSION_ID` + `AGENT_IS_RESUME` 환경변수 전달
+- `RuntimeManager.resetSession()`: 서버 종료 시 세션 초기화 — 새 서버 = 새 세션
+- `AgentMod.onServerStopping()`: `resetSession()` 호출 추가
+
+### 설계 판단
+
+기존: 매 명령마다 `query()` 새 호출 → brain이 이전 작업 컨텍스트 상실.
+변경: SDK의 `resume` 옵션으로 동일 세션 내 대화 히스토리 자동 이어가기.
+Brain이 "아까 상자에서 꺼낸 아이템", "방금 만든 농장" 같은 맥락을 기억한 채로 후속 명령 수행 가능.
+
+---
+
+## v0.2.3 — 2026-03-12 `[actions, brain, infra]`
+
+컨테이너 조작 개선 (슬롯 반환 + click_slot 피드백 강화) + 채팅 메시지 줄바꿈 + 프롬프트 가이드.
+
+### 변경 사항
+
+**`actions`**
+- `OpenContainerAction`: 열린 컨테이너의 모든 슬롯 내용물을 `slots` 배열로 반환 (I-008)
+- `ClickSlotAction` 피드백 강화: before/after 슬롯 상태 + carried 아이템 반환
+  - 파라미터명 다형성: `click_action`, `action_type`, `action` 순서로 읽기 (execute_sequence 경유 대응)
+  - `action` 필드 우선순위 최하위로 변경 — execute_sequence에서 `action`이 액션 이름(`"click_slot"`)과 충돌하는 버그 수정 (I-013)
+- `ContainerTransferAction` 신규 (내부 전용): ActionRegistry에만 등록, MCP 미노출
+
+**`brain`**
+- MCP `click_slot` 설명 강화: before/after 상태 반환 명시, execute_sequence 연계 안내
+- MCP `container_transfer` 제거 — 모델이 사전 학습된 click_slot 패턴을 선호하므로 모델 prior와 일치하는 방향으로 전환
+- `open_container` 설명 업데이트: 슬롯 내용물 반환 명시
+- 시스템 프롬프트 가이드: open→review slots→click_slot(quick_move) + execute_sequence 패턴
+
+**`infra`**
+- `RuntimeManager.relayToChat()`: `\n` 줄바꿈 처리 + 줄별 전송 (최대 20줄), 300자 truncate 제거 (I-009)
+
+### 설계 판단
+
+container_transfer를 MCP에 노출했으나 brain이 완전 무시하고 click_slot을 환각으로 호출.
+SDK가 MCP 미등록 도구 호출을 차단하지 않아 execute_sequence 경유로도 click_slot 사용.
+**결론**: 모델의 사전 학습 prior (click_slot 패턴)와 싸우지 말고, click_slot 자체를 강화하여 모델 prior를 활용.
+
+### 해결 이슈
+
+- [x] `I-008`: open_container 슬롯 반환 + click_slot 피드백 강화 (before/after/carried)
+- [x] `I-009`: relayToChat 줄바꿈 처리 — 긴 메시지를 줄별로 분리 전송
+- [x] `I-010`: 모델 prior 활용 전략으로 전환 — click_slot 유지하여 환각 호출 방지
+- [x] `I-013`: click_slot `action` 필드 우선순위 충돌 — execute_sequence에서 quick_move가 pickup으로 실행되는 버그 수정
+
+### 발견 이슈
+
+- [ ] `I-011`: execute_sequence가 MCP 미등록 action도 호출 가능 — ActionRegistry 직접 접근. 현재는 문제 없으나 향후 action 제거 시 주의 필요
+- [ ] `I-012`: 화로 제련 대기 — open/close 폴링 (10회 이상). 제련 완료 이벤트 또는 대기 메커니즘 필요
+
+---
+
+## v0.2.2 — 2026-03-12 `[actions, body]`
+
+환경 피드백 raw fact 보고 + 이동 시 시선 수평화.
+
+### 변경 사항
+
+**`actions`**
+- `UseItemOnAreaAction`: 실패 시 `failure_details` 배열 추가 — pos, block, above, result, dist (raw fact)
+- `UseItemOnAreaAction`: 대상 블록 위 블록 정보(`above`) substep 로그에 추가
+- `UseItemOnAreaAction`: 경로 실패(no_path, no_standing_position)도 failure_details에 포함
+
+**`body`**
+- `MoveToAction`: lookAt Y를 `waypoint.getY() + 0.5` → `agent.getEyeY()` (시선 수평화, I-006)
+- `UseItemOnAreaAction`: 이동 중 시선도 동일하게 수평화
+
+### 테스트 결과
+
+[v0.2.2 / 2026-03-12 실행 기록](runs/v0.2.2/2026-03-12.md) 참조.
+
+- 경작 성공률: **100%** (v0.2.1 48% → v0.2.2 100%)
+- Brain이 `failure_details`의 `above=grass` 정보로 풀 제거 후 재경작 자동 수행
+- 38턴, $0.69, 3분 25초
+
+### 해결 이슈
+
+- [x] `I-005`/`I-007`: 환경 제약 raw fact 보고 — brain이 failure_details로 실패 원인 추론 가능
+- [x] `I-006`: 이동 시 시선 수평화 — 진행 방향 정면 응시
+
+### 발견 이슈
+
+- [ ] `I-008`: 상자 아이템 추출 비효율 — open/close 3회 반복, brain이 한번에 파악 못함
+- [ ] `I-009`: 채팅 결과 보고 메시지 잘림 — 긴 메시지 truncate + `\n` 리터럴 표시
+- [ ] `I-010`: 제거된 도구(pickup_items) 호출 시도 — 프롬프트 또는 에러 메시지 개선 필요
+
+---
+
+## v0.2.1 — 2026-03-12 `[actions, brain, body, infra]`
+
+EquipAction 버그 수정 + 프롬프트 도구 가이드 + 채팅 줄바꿈 + 머리 회전 패킷 + pickup_items 제거.
+
+### 변경 사항
+
+**`actions`**
+- `EquipAction`: 아이템 1개만 장착 → 전체 스택 장착 (I-002 수정)
+- `PickupItemsAction` 제거 (legacy) — 2블록 자동흡수로 대체
+
+**`brain`**
+- 시스템 프롬프트에 Tool usage guide 섹션 추가:
+  ```
+  - Use mine_area instead of calling mine_block repeatedly
+  - Items within 2 blocks are auto-collected every tick
+  - Use execute_sequence to chain multiple actions in one call
+  - Use use_item_on_area for farming/planting area operations
+  - craft supports count parameter for batch crafting
+  ```
+- `pickup_items` MCP 도구 제거
+
+**`body`**
+- `AgentAnimation.lookAt()`: `ClientboundRotateHeadPacket` 추가 (머리 회전 동기화)
+
+**`infra`**
+- `ChatMonitor`: 60자 기준 줄바꿈 + word-wrap (채팅 잘림 수정)
+
+### 테스트 결과
+
+[v0.2.1 / 2026-03-12 실행 기록](runs/v0.2.1/2026-03-12.md) 참조.
+
+### 발견 이슈
+
+- [x] `I-002`: equip 전체 스택 장착으로 수정 완료
+- [x] `I-004`: pickup_items 제거 — 자동흡수로 대체
+- [ ] `I-005`: use_item_on_area에서 grass_block에 호미 PASS 반환 — 잔디(tall_grass) 위의 grass_block은 경작 불가, 잔디 제거 필요
+- [ ] `I-006`: MoveToAction lookAt이 다음 waypoint(발밑)를 바라봄 → 땅 응시하며 걷기 (정면 응시 필요)
+- [ ] `I-007`: 9×9 영역에 water/잔디 혼재 시 use_item_on_area 성공률 48% — 블록 필터링 또는 결과 보고 후 brain이 재시도 필요
+- [ ] `I-001`: 부분 해결 — equip 수정으로 아이템 소진 문제 해결, 그러나 PASS 반환 자체는 별도 원인 (I-005)
+
+---
+
+## v0.2.0 — 2026-03-11 `[actions, brain, body, infra]`
+
+행동 시퀀스 + 영역 기반 액션 + 애니메이션 + 실제 제작.
+
+### 변경 사항
+
+**`actions`**
+- `CraftAction` 전면 재작성: 레시피 조회 전용 → 실제 재료 소비 + 결과물 생성, `count` 파라미터
+- `MineAreaAction` 신규: 영역 채굴 (걷기+채굴 상태 머신, 최대 256블록)
+- `UseItemOnAreaAction` 신규: 2D 영역 우클릭 (서펜타인 패턴)
+- `SequenceAction` 신규: 액션 배열 순차 실행, sync 체이닝
+- 기존 액션에 `AgentAnimation.lookAt()` + `swingArm()` 추가
+
+**`brain`**
+- `maxTurns`: 20 → 50
+- MCP 도구 추가: `mine_area`, `use_item_on_area`, `execute_sequence`
+- `craft` 도구에 `count` 파라미터 추가
+
+**`body`**
+- `AgentAnimation` 유틸리티 신규: lookAt (yaw/pitch), swingArm 패킷 브로드캐스트
+- `AgentTickHandler`: 매 틱 2블록 반경 아이템 자동 흡수
+
+**`infra`**
+- `AsyncAction.getTimeoutMs()`: 액션별 동적 타임아웃 (하드코딩 60초 제거)
+- `PathFollower.getCurrentTarget()`: 현재 웨이포인트 조회
+- `AgentHttpServer`: 동적 타임아웃 적용
+
+### 테스트 결과
+
+[v0.2.0 / 2026-03-11 실행 기록](runs/v0.2.0/2026-03-11.md) 참조.
+
+### 발견 이슈
+
+- `I-001`: use_item_on_area 거리/위치 계산 → 부분 실패 후 개별 재시도
+- `I-002`: equip 매번 재호출 필요 — mainhand 아이템 유실 의심
+- `I-003`: mine_block x3 사용 — mine_area 미활용 (brain 문제)
+- `I-004`: pickup_items 수동 호출 — 자동흡수 인지 못함 (brain 문제)
+
+---
+
+## v0.1.0 — 2026-03-11 `[actions, brain, body, infra]`
+
+Phase 0~4 초기 구현. AsyncAction 인프라, useItemOn, 걷기, 틱 채굴.
+
+### 변경 사항
+
+**`brain`**
+- 시스템 프롬프트 (`prompt.ts`):
+  ```
+  You are a Minecraft agent controlling a player character in the world.
+  - Always call get_observation first
+  - Plan your actions step by step before executing
+  - You are invulnerable and don't need food
+  - Available tools will be provided by the MCP server.
+  ```
+- `maxTurns`: 20
+- MCP 도구 22개: get_observation, move_to, mine_block, place_block, pickup_items, drop_item, equip, attack, interact, open_container, click_slot, close_container, craft, smelt, use_item_on, remember_location, remember_facility, remember_preference, recall
+
+**`actions`**
+- 15개 기본 액션 구현 (move_to, mine_block, place_block, equip, attack 등)
+- craft/smelt은 레시피 조회만 (실제 제작 불가)
+
+**`body`**
+- FakePlayer 스폰/디스폰 + 클라이언트 가시성 패킷
+
+**`infra`**
+- HTTP 브릿지 (localhost:0, 자동 포트)
+- A* 패스파인딩 + 틱 기반 이동
+- AsyncAction 인프라 (ActiveActionManager, 60초 하드코딩 타임아웃)
+- Claude Agent SDK 런타임 + MCP 서버
+- 모니터링 (채팅, 터미널 연동)
+
+### 테스트 결과
+
+정식 테스트 미실시. craft가 레시피 조회만 수행, 실제 제작 불가 확인.

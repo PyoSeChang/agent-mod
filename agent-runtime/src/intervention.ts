@@ -1,8 +1,10 @@
 const bridgeUrl = process.env.AGENT_BRIDGE_URL || "http://localhost:3000";
+const agentName = process.env.AGENT_NAME || "";
+const agentPrefix = agentName ? `/agent/${agentName}` : "";
 
 export async function checkIntervention(): Promise<string | null> {
   try {
-    const res = await fetch(`${bridgeUrl}/intervention`);
+    const res = await fetch(`${bridgeUrl}${agentPrefix}/intervention`);
     if (!res.ok) return null;
     const data = await res.json() as { message?: string };
     return data.message || null;

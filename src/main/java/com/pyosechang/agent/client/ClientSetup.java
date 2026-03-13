@@ -20,6 +20,13 @@ public class ClientSetup {
         "key.categories.agent"
     );
 
+    public static final KeyMapping OPEN_AGENTS = new KeyMapping(
+        "key.agent.management",
+        KeyConflictContext.IN_GAME,
+        InputConstants.Type.KEYSYM.getOrCreate(GLFW.GLFW_KEY_G),
+        "key.categories.agent"
+    );
+
     public static void init(FMLJavaModLoadingContext context) {
         context.getModEventBus().addListener(ClientSetup::registerKeyMappings);
         MinecraftForge.EVENT_BUS.register(new ClientTickHandler());
@@ -27,6 +34,7 @@ public class ClientSetup {
 
     private static void registerKeyMappings(RegisterKeyMappingsEvent event) {
         event.register(OPEN_MEMORY);
+        event.register(OPEN_AGENTS);
     }
 
     public static class ClientTickHandler {
@@ -48,6 +56,14 @@ public class ClientSetup {
                     mc.setScreen(null);
                 } else {
                     mc.setScreen(new MemoryListScreen());
+                }
+            }
+
+            if (OPEN_AGENTS.consumeClick()) {
+                if (mc.screen instanceof AgentManagementScreen) {
+                    mc.setScreen(null);
+                } else {
+                    mc.setScreen(new AgentManagementScreen());
                 }
             }
         }

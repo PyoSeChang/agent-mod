@@ -50,7 +50,7 @@ public final class AgentAnimation {
      * Broadcast a packet to all real players on the server.
      */
     public static void broadcast(Packet<?> packet) {
-        MinecraftServer server = FakePlayerManager.getInstance().getServer();
+        MinecraftServer server = AgentManager.getInstance().getServer();
         if (server == null) return;
         for (ServerPlayer player : server.getPlayerList().getPlayers()) {
             player.connection.send(packet);

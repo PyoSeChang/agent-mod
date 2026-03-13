@@ -1,7 +1,6 @@
 package com.pyosechang.agent.core;
 
 import com.pyosechang.agent.AgentMod;
-import com.pyosechang.agent.core.action.ActiveActionManager;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.item.ItemStack;
@@ -20,16 +19,18 @@ public class AgentTickHandler {
     public static void onServerTick(TickEvent.ServerTickEvent event) {
         if (event.phase != TickEvent.Phase.END) return;
 
-        FakePlayerManager manager = FakePlayerManager.getInstance();
-        if (!manager.isSpawned()) return;
+        AgentManager manager = AgentManager.getInstance();
+        if (manager.getAgentCount() == 0) return;
 
-        FakePlayer agent = manager.getAgent();
+        for (AgentContext ctx : manager.getAllAgents()) {
+            FakePlayer agent = ctx.getFakePlayer();
 
-        // Tick the active async action (movement, mining, etc.)
-        ActiveActionManager.getInstance().tick(agent);
+            // Tick the active async action (movement, mining, etc.)
+            ctx.getActionManager().tick(agent);
 
-        // Auto-pickup nearby items (2-block radius)
-        pickupNearbyItems(agent);
+            // Auto-pickup nearby items (2-block radius)
+            pickupNearbyItems(agent);
+        }
     }
 
     private static void pickupNearbyItems(FakePlayer agent) {

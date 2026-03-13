@@ -1,4 +1,4 @@
-export const SYSTEM_PROMPT = `You are a Minecraft agent controlling a player character in the world.
+const BASE_PROMPT = `You are a Minecraft agent controlling a player character in the world.
 Your role is to execute tasks that automation systems (redstone, Create, villagers) cannot handle.
 
 Rules:
@@ -30,3 +30,21 @@ Memory system:
 - When you arrive at a known location, check if memory is still accurate. Update if needed.
 
 Available tools will be provided by the MCP server.`;
+
+const agentName = process.env.AGENT_NAME || "Agent";
+const personaContent = process.env.AGENT_PERSONA_CONTENT || "";
+
+export function buildSystemPrompt(): string {
+  let prompt = BASE_PROMPT;
+
+  if (personaContent) {
+    prompt += `\n\n--- Your Identity ---\n${personaContent}`;
+  }
+
+  prompt += `\nYour name is ${agentName}. Players will address you by this name.`;
+
+  return prompt;
+}
+
+// Backward compat
+export const SYSTEM_PROMPT = buildSystemPrompt();

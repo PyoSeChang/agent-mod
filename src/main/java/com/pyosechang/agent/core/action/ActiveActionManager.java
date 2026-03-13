@@ -8,19 +8,18 @@ import org.slf4j.Logger;
 import java.util.concurrent.CompletableFuture;
 
 /**
- * Manages the single currently-running async action.
+ * Manages the single currently-running async action for one agent.
  * Starting a new action automatically cancels the previous one
  * (just like a real player stops walking when they start mining).
+ *
+ * Each AgentContext holds its own instance.
  */
 public class ActiveActionManager {
 
     private static final Logger LOGGER = LogUtils.getLogger();
-    private static final ActiveActionManager INSTANCE = new ActiveActionManager();
 
     private AsyncAction currentAction;
     private CompletableFuture<JsonObject> currentFuture;
-
-    public static ActiveActionManager getInstance() { return INSTANCE; }
 
     /**
      * Start a new async action, cancelling any currently running one.
