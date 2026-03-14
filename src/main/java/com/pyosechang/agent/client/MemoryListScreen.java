@@ -1,9 +1,10 @@
 package com.pyosechang.agent.client;
 
 import com.google.gson.JsonArray;
-import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
-import net.minecraft.client.Minecraft;
+import com.pyosechang.agent.core.AgentManager;
+import com.pyosechang.agent.core.memory.MemoryEntry;
+import com.pyosechang.agent.core.memory.MemoryManager;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.components.Button;
@@ -15,10 +16,11 @@ import java.util.List;
 
 /**
  * Memory list screen — dropdown for category + agent scope, search, scope badges.
+ * Reads directly from MemoryManager (no HTTP bridge).
  */
 public class MemoryListScreen extends Screen {
-    private static final String[] CATEGORIES = {"all", "storage", "facility", "area", "event", "preference", "skill"};
-    private static final int[] CATEGORY_COLORS = {0xAAAAAA, 0x55FF55, 0xFFAA00, 0x55FFFF, 0xFFFF55, 0xFF55FF, 0x5555FF};
+    private static final String[] CATEGORIES = {"all", "storage", "facility", "area", "event", "skill"};
+    private static final int[] CATEGORY_COLORS = {0xAAAAAA, 0x55FF55, 0xFFAA00, 0x55FFFF, 0xFFFF55, 0x5555FF};
     private static final int ENTRY_HEIGHT = 24;
     private static final int LIST_TOP = 38;
 
@@ -42,8 +44,6 @@ public class MemoryListScreen extends Screen {
     protected void init() {
         int centerX = width / 2;
 
-        // Row 1: Category dropdown + Scope dropdown + Search box
-        // Category dropdown (left)
         categoryDropdown = new DropdownWidget(font, 8, 18, 80, 16, Component.literal("Category"));
         for (int i = 0; i < CATEGORIES.length; i++) {
             String cat = CATEGORIES[i];
@@ -58,7 +58,6 @@ public class MemoryListScreen extends Screen {
         });
         addRenderableWidget(categoryDropdown);
 
-        // Scope dropdown
         scopeDropdown = new DropdownWidget(font, 92, 18, 80, 16, Component.literal("Scope"));
         scopeDropdown.addEntry("all", "All", 0xFFFFFF);
         scopeDropdown.setSelectedByKey(selectedScope);
@@ -69,13 +68,11 @@ public class MemoryListScreen extends Screen {
         });
         addRenderableWidget(scopeDropdown);
 
-        // Search box
         searchBox = new EditBox(font, 176, 18, width - 184, 16, Component.literal("Search"));
         searchBox.setHint(Component.literal("Search memories..."));
         searchBox.setResponder(text -> refreshList());
         addRenderableWidget(searchBox);
 
-        // New Memory button
         addRenderableWidget(Button.builder(Component.literal("+ New Memory"), btn -> {
             minecraft.setScreen(new MemoryEditScreen(null, this));
         }).bounds(centerX - 55, height - 24, 110, 20).build());
@@ -85,66 +82,57 @@ public class MemoryListScreen extends Screen {
     }
 
     private void loadAgentNames() {
-        BridgeClient.get("/agents/list").thenAccept(result -> {
-            if (result.has("agents")) {
-                Minecraft.getInstance().tell(() -> {
-                    // Rebuild scope dropdown with agent names
-                    String currentKey = scopeDropdown.getSelectedKey();
-                    scopeDropdown.clearEntries();
-                    scopeDropdown.addEntry("all", "All", 0xFFFFFF);
-                    for (JsonElement el : result.getAsJsonArray("agents")) {
-                        JsonObject a = el.getAsJsonObject();
-                        String name = a.get("name").getAsString();
+        // Direct access — AgentManager has agent directories on disk
+        try {
+            java.nio.file.Path agentsDir = net.minecraftforge.fml.loading.FMLPaths.GAMEDIR.get().resolve(".agent/agents");
+            if (java.nio.file.Files.isDirectory(agentsDir)) {
+                String currentKey = scopeDropdown.getSelectedKey();
+                scopeDropdown.clearEntries();
+                scopeDropdown.addEntry("all", "All", 0xFFFFFF);
+                try (var dirs = java.nio.file.Files.list(agentsDir)) {
+                    dirs.filter(java.nio.file.Files::isDirectory).forEach(dir -> {
+                        String name = dir.getFileName().toString();
                         scopeDropdown.addEntry(name, name, 0x55BBFF);
-                    }
-                    scopeDropdown.setSelectedByKey(currentKey);
-                });
+                    });
+                }
+                scopeDropdown.setSelectedByKey(currentKey);
             }
-        });
+        } catch (Exception ignored) {}
     }
 
     private void refreshList() {
         String query = searchBox != null ? searchBox.getValue() : "";
         String category = "all".equals(selectedCategory) ? null : selectedCategory;
 
-        JsonObject body = new JsonObject();
-        body.addProperty("query", query);
-        if (category != null) body.addProperty("category", category);
-
+        String scope;
         if ("all".equals(selectedScope)) {
-            body.addProperty("scope", "all");
+            scope = "all";
         } else if ("global".equals(selectedScope)) {
-            body.addProperty("scope", "global");
+            scope = "global";
         } else {
-            body.addProperty("scope", "agent:" + selectedScope);
+            scope = "agent:" + selectedScope;
         }
 
-        BridgeClient.post("/memory/search", body).thenAccept(result -> {
-            if (result.has("entries")) {
-                List<JsonObject> entries = new ArrayList<>();
-                for (JsonElement el : result.getAsJsonArray("entries")) {
-                    entries.add(el.getAsJsonObject());
-                }
-                Minecraft.getInstance().tell(() -> {
-                    displayedEntries = entries;
-                    selectedIndex = -1;
-                });
-            }
-        });
+        List<MemoryEntry> results = MemoryManager.getInstance().search(query, category, scope);
+        MemoryManager mm = MemoryManager.getInstance();
+
+        List<JsonObject> entries = new ArrayList<>();
+        for (MemoryEntry e : results) {
+            entries.add(mm.entryToJson(e));
+        }
+        displayedEntries = entries;
+        selectedIndex = -1;
     }
 
     @Override
     public void render(GuiGraphics g, int mouseX, int mouseY, float partialTick) {
         renderBackground(g);
 
-        // Title bar
         g.fill(0, 0, width, 14, 0x80000000);
         g.drawCenteredString(font, title, width / 2, 3, 0xFFFFFF);
 
-        // Separator below controls
         g.fill(4, LIST_TOP - 2, width - 4, LIST_TOP - 1, 0x30FFFFFF);
 
-        // List entries
         int listBottom = height - 30;
         int visibleEntries = (listBottom - LIST_TOP) / ENTRY_HEIGHT;
         int maxScroll = Math.max(0, displayedEntries.size() - visibleEntries);
@@ -195,20 +183,16 @@ public class MemoryListScreen extends Screen {
             }
         }
 
-        // Scroll indicator
         if (displayedEntries.size() > visibleEntries && visibleEntries > 0) {
             int barH = Math.max(8, visibleEntries * (listBottom - LIST_TOP) / displayedEntries.size());
             int barY = LIST_TOP + (scrollOffset * (listBottom - LIST_TOP - barH)) / Math.max(1, maxScroll);
             g.fill(width - 4, barY, width - 2, barY + barH, 0x60FFFFFF);
         }
 
-        // Status bar
         g.drawString(font, displayedEntries.size() + " entries", 4, height - 10, 0x808080);
 
-        // Render normal widgets first
         super.render(g, mouseX, mouseY, partialTick);
 
-        // Render dropdown overlays LAST (on top of everything)
         categoryDropdown.renderDropdown(g, mouseX, mouseY);
         scopeDropdown.renderDropdown(g, mouseX, mouseY);
     }
@@ -218,16 +202,11 @@ public class MemoryListScreen extends Screen {
             JsonArray vt = entry.getAsJsonArray("visible_to");
             if (vt.isEmpty()) return "global";
             StringBuilder sb = new StringBuilder();
-            for (JsonElement el : vt) {
+            for (var el : vt) {
                 if (!sb.isEmpty()) sb.append(", ");
                 sb.append(el.getAsString());
             }
             return sb.toString();
-        }
-        if (entry.has("scope")) {
-            String scope = entry.get("scope").getAsString();
-            if (scope.startsWith("agent:")) return scope.substring(6);
-            return scope;
         }
         return "global";
     }
@@ -235,7 +214,6 @@ public class MemoryListScreen extends Screen {
     @Override
     public boolean mouseClicked(double mouseX, double mouseY, int button) {
         if (button == 0) {
-            // Let open dropdowns handle clicks first
             if (categoryDropdown.isOpen()) {
                 boolean handled = categoryDropdown.mouseClicked(mouseX, mouseY, button);
                 if (handled) return true;
@@ -245,10 +223,6 @@ public class MemoryListScreen extends Screen {
                 if (handled) return true;
             }
 
-            // Close other dropdown when one opens
-            // (handled naturally — clicking one dropdown closes via its toggle)
-
-            // List entry clicks (only when no dropdown is open)
             if (!categoryDropdown.isOpen() && !scopeDropdown.isOpen()) {
                 int listBottom = height - 30;
                 int visibleEntries = (listBottom - LIST_TOP) / ENTRY_HEIGHT;
@@ -282,7 +256,6 @@ public class MemoryListScreen extends Screen {
             case "facility" -> 0xFFAA00;
             case "area" -> 0x55FFFF;
             case "event" -> 0xFFFF55;
-            case "preference" -> 0xFF55FF;
             case "skill" -> 0x5555FF;
             default -> 0xAAAAAA;
         };

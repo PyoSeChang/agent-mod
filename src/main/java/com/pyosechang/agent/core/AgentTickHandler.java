@@ -1,7 +1,9 @@
 package com.pyosechang.agent.core;
 
 import com.pyosechang.agent.AgentMod;
+import com.pyosechang.agent.core.schedule.ScheduleManager;
 import net.minecraft.network.protocol.game.ClientboundTeleportEntityPacket;
+import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.item.ItemEntity;
@@ -20,6 +22,16 @@ public class AgentTickHandler {
     @SubscribeEvent
     public static void onServerTick(TickEvent.ServerTickEvent event) {
         if (event.phase != TickEvent.Phase.END) return;
+
+        // Schedule tick evaluation
+        MinecraftServer server = AgentManager.getInstance().getServer();
+        if (server != null) {
+            ServerLevel overworld = server.overworld();
+            long dayTime = overworld.getDayTime();
+            long dayCount = dayTime / 24000;
+            long tickInDay = dayTime % 24000;
+            ScheduleManager.getInstance().tick(tickInDay, dayCount, server.getTickCount());
+        }
 
         AgentManager manager = AgentManager.getInstance();
         if (manager.getAgentCount() == 0) return;

@@ -213,10 +213,11 @@ public class ObservationBuilder {
         double ax = agent.getX(), ay = agent.getY(), az = agent.getZ();
         MemoryManager mm = MemoryManager.getInstance();
 
-        // Title index: all entries (global + agent) sorted by distance
+        // Title index: all entries (global + agent) sorted by distance, excluding schedules
         JsonArray titleIndex = new JsonArray();
         List<Map.Entry<MemoryEntry, Double>> indexed = mm.getAllForTitleIndex(ax, ay, az, agentName);
         for (Map.Entry<MemoryEntry, Double> pair : indexed) {
+            if ("schedule".equals(pair.getKey().getCategory())) continue;
             titleIndex.add(mm.entryToSummaryJson(pair.getKey(), pair.getValue()));
         }
         memories.add("title_index", titleIndex);

@@ -54,27 +54,21 @@ server.tool("execute_sequence", "Execute a sequence of actions one after another
 
 // --- Memory tools (always registered) ---
 
-server.tool("remember", "Save a memory. The agent remembers locations, facilities, resources, procedures, preferences. If no location is provided, current position is used.",
+server.tool("remember", "Save a memory. The agent remembers locations, facilities, resources, procedures. If no location is provided, current position is used. Use @memory:mXXX in content to reference other memories.",
   {
     title: z.string().describe("Short title (1 line)"),
     description: z.string().describe("Keywords-rich description for matching"),
-    content: z.string().describe("Detailed information"),
-    category: z.enum(["storage", "facility", "area", "event", "preference", "skill"]),
-    tags: z.array(z.string()).optional().default([]),
+    content: z.string().describe("Detailed information. Use @memory:mXXX to reference other memories"),
+    category: z.enum(["storage", "facility", "area", "event", "skill"]),
     location: z.object({
       type: z.enum(["point", "area"]),
-      x: z.number().optional(),
-      y: z.number().optional(),
-      z: z.number().optional(),
-      radius: z.number().optional(),
-      x1: z.number().optional(),
-      z1: z.number().optional(),
-      x2: z.number().optional(),
-      z2: z.number().optional(),
-    }).optional(),
+      x: z.number().optional(), y: z.number().optional(), z: z.number().optional(),
+      x1: z.number().optional(), y1: z.number().optional(), z1: z.number().optional(),
+      x2: z.number().optional(), y2: z.number().optional(), z2: z.number().optional(),
+    }).optional().describe("point: (x,y,z). area: (x1,y1,z1)-(x2,y2,z2). Required for storage/area, optional for facility/event"),
   },
-  async ({ title, description, content, category, tags, location }) => ({
-    content: [{ type: "text", text: await bridgeFetch("/memory/create", "POST", { title, description, content, category, tags, location }) }],
+  async ({ title, description, content, category, location }) => ({
+    content: [{ type: "text", text: await bridgeFetch("/memory/create", "POST", { title, description, content, category, location }) }],
   })
 );
 
@@ -84,16 +78,14 @@ server.tool("update_memory", "Update an existing memory entry (partial update)",
     title: z.string().optional(),
     description: z.string().optional(),
     content: z.string().optional(),
-    category: z.enum(["storage", "facility", "area", "event", "preference", "skill"]).optional(),
-    tags: z.array(z.string()).optional(),
+    category: z.enum(["storage", "facility", "area", "event", "skill"]).optional(),
   },
-  async ({ id, title, description, content, category, tags }) => {
+  async ({ id, title, description, content, category }) => {
     const fields: Record<string, unknown> = { id };
     if (title !== undefined) fields.title = title;
     if (description !== undefined) fields.description = description;
     if (content !== undefined) fields.content = content;
     if (category !== undefined) fields.category = category;
-    if (tags !== undefined) fields.tags = tags;
     return {
       content: [{ type: "text", text: await bridgeFetch("/memory/update", "POST", fields) }],
     };
@@ -116,8 +108,8 @@ server.tool("recall", "Retrieve full content of a memory entry. Use when you see
 
 server.tool("search_memory", "Search memories by keyword and/or category",
   {
-    query: z.string().optional().default("").describe("Keyword to search in title, description, tags"),
-    category: z.enum(["storage", "facility", "area", "event", "preference", "skill"]).optional(),
+    query: z.string().optional().default("").describe("Keyword to search in title and description"),
+    category: z.enum(["storage", "facility", "area", "event", "skill"]).optional(),
   },
   async ({ query, category }) => ({
     content: [{ type: "text", text: await bridgeFetch("/memory/search", "POST", { query, category }) }],

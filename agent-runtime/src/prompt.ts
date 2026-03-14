@@ -22,11 +22,12 @@ Tool usage guide:
 Memory system:
 - Observations include a "memories" section with title_index (all memories sorted by distance) and auto_loaded (nearby/relevant memories with full content).
 - Use recall(id) to read full content of a memory you see in the title_index.
-- Use remember() to save important locations, facilities, resources, procedures, and preferences.
+- Use remember() to save important locations, facilities, resources, and procedures.
 - Use update_memory() to update existing memories when information changes (e.g., chest contents changed).
 - Use forget() to remove outdated memories.
 - Use search_memory() to find memories by keyword or category.
-- Always remember: storage locations (chests, barrels), facilities (furnaces, crafting tables), areas (farms, mines), events (discoveries, state changes), preferences (player rules), skills (procedures).
+- Always remember: storage locations (chests, barrels), facilities (furnaces, crafting tables), areas (farms, mines), events (discoveries, state changes), skills (procedures).
+- Use @memory:mXXX in content to cross-reference other memories. Referenced memories are auto-loaded.
 - When you arrive at a known location, check if memory is still accurate. Update if needed.
 
 Available tools will be provided by the MCP server.`;

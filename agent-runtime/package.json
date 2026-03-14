@@ -4,6 +4,7 @@
   "type": "module",
   "scripts": {
     "dev": "tsx src/index.ts",
+    "dev:manager": "tsx src/manager-index.ts",
     "build": "tsc",
     "test:bridge": "tsx tests/test-bridge.ts",
     "test:mcp": "tsx tests/test-mcp.ts",

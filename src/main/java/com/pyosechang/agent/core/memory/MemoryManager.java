@@ -15,21 +15,31 @@ import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.util.*;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 /**
  * Memory manager with unified entry list and m:n visibility via visibleTo.
- * All entries stored in .agent/memory.json.
- * On first load, migrates per-agent files from .agent/agents/{name}/memory.json.
+ * All entries stored in .agent/memory.json with version 2 format.
+ * Supports polymorphic MemoryEntry subclasses via Gson TypeAdapters.
  */
 public class MemoryManager {
     private static final Logger LOGGER = LogUtils.getLogger();
-    private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
     private static final MemoryManager INSTANCE = new MemoryManager();
+
+    private static final Gson GSON = new GsonBuilder()
+        .setPrettyPrinting()
+        .registerTypeAdapter(MemoryEntry.class, new MemoryEntryTypeAdapter())
+        .registerTypeAdapter(MemoryLocation.class, new MemoryLocationTypeAdapter())
+        .registerTypeAdapter(com.pyosechang.agent.core.schedule.ScheduleConfig.class, new com.pyosechang.agent.core.schedule.ScheduleConfigTypeAdapter())
+        .create();
 
     private static final double AUTO_LOAD_RADIUS = 32.0;
     private static final int MAX_RECENT_EVENTS = 5;
+    private static final int REFERENCE_MAX_DEPTH = 3;
+    private static final Pattern REFERENCE_PATTERN = Pattern.compile("@memory:(m\\d+)");
 
     private final CopyOnWriteArrayList<MemoryEntry> entries = new CopyOnWriteArrayList<>();
     private int nextIdCounter = 1;
@@ -45,8 +55,39 @@ public class MemoryManager {
     }
 
     public void load() {
-        // Load main memory file
-        loadFromFile(getGlobalPath(), entries);
+        Path path = getGlobalPath();
+        if (Files.exists(path)) {
+            try (Reader reader = Files.newBufferedReader(path, StandardCharsets.UTF_8)) {
+                JsonElement root = JsonParser.parseReader(reader);
+
+                List<MemoryEntry> loaded;
+                if (root.isJsonObject() && root.getAsJsonObject().has("version")) {
+                    // Version 2 format: {"version": 2, "entries": [...]}
+                    JsonArray entriesArr = root.getAsJsonObject().getAsJsonArray("entries");
+                    loaded = GSON.fromJson(entriesArr, new TypeToken<List<MemoryEntry>>(){}.getType());
+                } else if (root.isJsonArray()) {
+                    // Version 1 format: bare array (old format)
+                    loaded = GSON.fromJson(root, new TypeToken<List<MemoryEntry>>(){}.getType());
+                    LOGGER.info("Migrating memory.json from v1 (bare array) to v2 format");
+                } else {
+                    loaded = null;
+                }
+
+                if (loaded != null) {
+                    entries.clear();
+                    entries.addAll(loaded);
+                    for (MemoryEntry e : loaded) {
+                        int num = parseIdNumber(e.getId());
+                        if (num >= nextIdCounter) {
+                            nextIdCounter = num + 1;
+                        }
+                    }
+                }
+            } catch (Exception e) {
+                LOGGER.error("Failed to load memory from {}", path, e);
+            }
+        }
+
         LOGGER.info("Loaded {} memory entries from global file", entries.size());
 
         // Migrate per-agent memory files
@@ -65,63 +106,40 @@ public class MemoryManager {
             }
         }
 
-        // Migrate any entries that have old scope field but no visibleTo
-        for (MemoryEntry entry : entries) {
-            if (entry.getVisibleTo().isEmpty()) {
-                // Check if the transient scope field was deserialized (backward compat)
-                // Gson would have set the scope field directly; use setScope to convert
-                // We need to re-derive visibleTo from scope if scope was set by deserialization
-                // The scope field is kept in JSON for backward compat
-                // After deserialization, if visibleTo is null/empty but scope is agent:X,
-                // we need to convert
-                try {
-                    java.lang.reflect.Field scopeField = MemoryEntry.class.getDeclaredField("scope");
-                    scopeField.setAccessible(true);
-                    String rawScope = (String) scopeField.get(entry);
-                    if (rawScope != null && !rawScope.equals("global")) {
-                        entry.setScope(rawScope); // this converts to visibleTo
-                    }
-                } catch (Exception ignored) {}
-            }
-        }
-
         save();
     }
 
     private void migrateAgentMemory(String agentName, Path agentMemoryFile) {
-        CopyOnWriteArrayList<MemoryEntry> agentEntries = new CopyOnWriteArrayList<>();
-        loadFromFile(agentMemoryFile, agentEntries);
-
-        if (agentEntries.isEmpty()) {
-            deleteFile(agentMemoryFile);
-            return;
-        }
-
-        // Collect existing IDs to skip duplicates
-        Set<String> existingIds = entries.stream()
-            .map(MemoryEntry::getId)
-            .collect(Collectors.toSet());
-
-        int migrated = 0;
-        for (MemoryEntry entry : agentEntries) {
-            if (existingIds.contains(entry.getId())) continue;
-
-            // Set visibleTo if not already set
-            if (entry.getVisibleTo().isEmpty() && !entry.isGlobal()) {
-                // Already scoped — keep it
-            } else if (entry.getVisibleTo().isEmpty()) {
-                // Was in per-agent file but has no explicit scope — assign to this agent
-                entry.setVisibleTo(List.of(agentName));
+        try (Reader reader = Files.newBufferedReader(agentMemoryFile, StandardCharsets.UTF_8)) {
+            List<MemoryEntry> agentEntries = GSON.fromJson(reader,
+                new TypeToken<List<MemoryEntry>>(){}.getType());
+            if (agentEntries == null || agentEntries.isEmpty()) {
+                deleteFile(agentMemoryFile);
+                return;
             }
-            // If visibleTo already set, respect it
 
-            entries.add(entry);
-            existingIds.add(entry.getId());
-            migrated++;
+            Set<String> existingIds = entries.stream()
+                .map(MemoryEntry::getId)
+                .collect(Collectors.toSet());
+
+            int migrated = 0;
+            for (MemoryEntry entry : agentEntries) {
+                if (existingIds.contains(entry.getId())) continue;
+                if (entry.getVisibleTo().isEmpty()) {
+                    entry.setVisibleTo(List.of(agentName));
+                }
+                entries.add(entry);
+                existingIds.add(entry.getId());
+                int num = parseIdNumber(entry.getId());
+                if (num >= nextIdCounter) nextIdCounter = num + 1;
+                migrated++;
+            }
+
+            LOGGER.info("Migrated {} entries from agent '{}' memory file", migrated, agentName);
+            deleteFile(agentMemoryFile);
+        } catch (Exception e) {
+            LOGGER.error("Failed to migrate agent memory for '{}'", agentName, e);
         }
-
-        LOGGER.info("Migrated {} entries from agent '{}' memory file", migrated, agentName);
-        deleteFile(agentMemoryFile);
     }
 
     private void deleteFile(Path path) {
@@ -134,35 +152,15 @@ public class MemoryManager {
     }
 
     public void save() {
-        saveToFile(getGlobalPath(), entries);
-    }
-
-    private void loadFromFile(Path path, CopyOnWriteArrayList<MemoryEntry> target) {
-        if (!Files.exists(path)) return;
-        try (Reader reader = Files.newBufferedReader(path, StandardCharsets.UTF_8)) {
-            List<MemoryEntry> loaded = GSON.fromJson(reader,
-                new TypeToken<List<MemoryEntry>>(){}.getType());
-            if (loaded != null) {
-                target.clear();
-                target.addAll(loaded);
-                for (MemoryEntry e : loaded) {
-                    int num = parseIdNumber(e.getId());
-                    if (num >= nextIdCounter) {
-                        nextIdCounter = num + 1;
-                    }
-                }
-            }
-        } catch (Exception e) {
-            LOGGER.error("Failed to load memory from {}", path, e);
-        }
-    }
-
-    private void saveToFile(Path path, CopyOnWriteArrayList<MemoryEntry> source) {
+        Path path = getGlobalPath();
         try {
             Files.createDirectories(path.getParent());
             Path tmp = path.resolveSibling(path.getFileName() + ".tmp");
             try (Writer writer = Files.newBufferedWriter(tmp, StandardCharsets.UTF_8)) {
-                GSON.toJson(source, writer);
+                JsonObject root = new JsonObject();
+                root.addProperty("version", 2);
+                root.add("entries", GSON.toJsonTree(entries, new TypeToken<List<MemoryEntry>>(){}.getType()));
+                GSON.toJson(root, writer);
             }
             Files.move(tmp, path, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
         } catch (IOException e) {
@@ -195,36 +193,38 @@ public class MemoryManager {
 
     // --- CRUD ---
 
-    public synchronized MemoryEntry create(String title, String description, String content,
-                                            String category, List<String> tags,
-                                            MemoryLocation location, String scope) {
-        return create(title, description, content, category, tags, location, scope, null);
-    }
-
-    public synchronized MemoryEntry create(String title, String description, String content,
-                                            String category, List<String> tags,
-                                            MemoryLocation location, String scope,
-                                            List<String> visibleTo) {
-        MemoryEntry entry = new MemoryEntry();
+    /** Create a memory entry from a JSON object (category determines subclass). */
+    public synchronized MemoryEntry createFromJson(JsonObject json) {
+        // Ensure category is set for type adapter dispatch
+        if (!json.has("category")) json.addProperty("category", "event");
+        MemoryEntry entry = GSON.fromJson(json, MemoryEntry.class);
         entry.setId(nextId());
-        entry.setTitle(title);
-        entry.setDescription(description);
-        entry.setContent(content);
-        entry.setCategory(category != null ? category : "event");
-        entry.setTags(tags);
-        entry.setLocation(location);
-
-        // visibleTo takes precedence over scope
-        if (visibleTo != null) {
-            entry.setVisibleTo(visibleTo);
-        } else if (scope != null) {
-            entry.setScope(scope);
-        }
-        // default: visibleTo is empty (global)
-
+        String now = java.time.Instant.now().toString();
+        entry.setCreatedAt(now);
+        entry.setUpdatedAt(now);
         entries.add(entry);
         save();
         return entry;
+    }
+
+    /** Backward-compatible create for schedule and HTTP API. */
+    public synchronized MemoryEntry create(String title, String description, String content,
+                                            String category, MemoryLocation location,
+                                            List<String> visibleTo) {
+        JsonObject json = new JsonObject();
+        json.addProperty("title", title);
+        json.addProperty("description", description);
+        if (content != null) json.addProperty("content", content);
+        json.addProperty("category", category != null ? category : "event");
+        if (location != null) {
+            json.add("location", GSON.toJsonTree(location, MemoryLocation.class));
+        }
+        if (visibleTo != null && !visibleTo.isEmpty()) {
+            JsonArray vt = new JsonArray();
+            for (String v : visibleTo) vt.add(v);
+            json.add("visibleTo", vt);
+        }
+        return createFromJson(json);
     }
 
     public MemoryEntry get(String id) {
@@ -242,15 +242,9 @@ public class MemoryManager {
         if (fields.has("description")) entry.setDescription(fields.get("description").getAsString());
         if (fields.has("content")) entry.setContent(fields.get("content").getAsString());
         if (fields.has("category")) entry.setCategory(fields.get("category").getAsString());
-        if (fields.has("tags")) {
-            List<String> tags = new ArrayList<>();
-            for (JsonElement el : fields.getAsJsonArray("tags")) {
-                tags.add(el.getAsString());
-            }
-            entry.setTags(tags);
-        }
-        if (fields.has("location")) {
-            entry.setLocation(MemoryLocation.fromJson(fields.getAsJsonObject("location")));
+        if (fields.has("location") && entry instanceof Locatable) {
+            MemoryLocation loc = GSON.fromJson(fields.get("location"), MemoryLocation.class);
+            setLocationOnEntry(entry, loc);
         }
         if (fields.has("visible_to")) {
             List<String> vt = new ArrayList<>();
@@ -258,12 +252,26 @@ public class MemoryManager {
                 vt.add(el.getAsString());
             }
             entry.setVisibleTo(vt);
-        } else if (fields.has("scope")) {
-            entry.setScope(fields.get("scope").getAsString());
+        }
+        // Schedule-specific: config update
+        if (fields.has("config") && entry instanceof ScheduleMemory sm) {
+            sm.setConfig(GSON.fromJson(fields.get("config"), com.pyosechang.agent.core.schedule.ScheduleConfig.class));
         }
         entry.markUpdated();
         save();
         return entry;
+    }
+
+    private void setLocationOnEntry(MemoryEntry entry, MemoryLocation loc) {
+        if (entry instanceof StorageMemory sm) {
+            sm.setLocation(loc);
+        } else if (entry instanceof FacilityMemory fm) {
+            fm.setLocation(loc);
+        } else if (entry instanceof AreaMemory am && loc instanceof AreaLocation al) {
+            am.setLocation(al);
+        } else if (entry instanceof EventMemory em) {
+            em.setLocation(loc);
+        }
     }
 
     public synchronized boolean delete(String id) {
@@ -303,12 +311,10 @@ public class MemoryManager {
             .collect(Collectors.toList());
     }
 
-    /** Backward-compatible search (all scopes) */
     public List<MemoryEntry> search(String query, String category) {
         return search(query, category, (String) null);
     }
 
-    /** Search across all scopes explicitly */
     public List<MemoryEntry> searchAll(String query, String category) {
         return search(query, category, (String) null);
     }
@@ -323,8 +329,8 @@ public class MemoryManager {
         List<Map.Entry<MemoryEntry, Double>> result = new ArrayList<>();
         for (MemoryEntry e : merged) {
             double dist = -1;
-            if (e.getLocation() != null) {
-                dist = e.getLocation().distanceTo(agentX, agentY, agentZ);
+            if (e instanceof Locatable loc && loc.getLocation() != null) {
+                dist = loc.getLocation().distanceTo(agentX, agentY, agentZ);
             }
             result.add(Map.entry(e, dist));
         }
@@ -337,40 +343,37 @@ public class MemoryManager {
         return result;
     }
 
-    /** Backward-compatible overload */
     public List<Map.Entry<MemoryEntry, Double>> getAllForTitleIndex(double agentX, double agentY, double agentZ) {
         return getAllForTitleIndex(agentX, agentY, agentZ, null);
     }
 
     /**
      * Get entries whose content should be auto-loaded (filtered by agent visibility).
+     * Includes @reference recursive resolution.
      */
     public List<MemoryEntry> getAutoLoadContent(double agentX, double agentY, double agentZ, String agentName) {
         List<MemoryEntry> merged = getMergedEntries(agentName);
+        Set<String> loadedIds = new HashSet<>();
         List<MemoryEntry> result = new ArrayList<>();
 
-        // 1. preference -> always
+        // 1. storage/facility/area -> within 32 blocks
         for (MemoryEntry e : merged) {
-            if ("preference".equals(e.getCategory())) {
-                e.markLoaded();
-                result.add(e);
-            }
-        }
-
-        // 2. storage/facility/area -> within 32 blocks
-        for (MemoryEntry e : merged) {
+            if (e instanceof ScheduleMemory) continue;
+            if (loadedIds.contains(e.getId())) continue;
             String cat = e.getCategory();
             if (("storage".equals(cat) || "facility".equals(cat) || "area".equals(cat))
-                    && e.getLocation() != null
-                    && e.getLocation().isWithinRange(agentX, agentY, agentZ, AUTO_LOAD_RADIUS)) {
+                    && e instanceof Locatable loc && loc.getLocation() != null
+                    && loc.getLocation().isWithinRange(agentX, agentY, agentZ, AUTO_LOAD_RADIUS)) {
                 e.markLoaded();
                 result.add(e);
+                loadedIds.add(e.getId());
             }
         }
 
-        // 3. event -> latest 5 by updatedAt
+        // 2. event -> latest 5 by updatedAt
         List<MemoryEntry> events = merged.stream()
             .filter(e -> "event".equals(e.getCategory()))
+            .filter(e -> !loadedIds.contains(e.getId()))
             .sorted((a, b) -> {
                 String at = a.getUpdatedAt() != null ? a.getUpdatedAt() : "";
                 String bt = b.getUpdatedAt() != null ? b.getUpdatedAt() : "";
@@ -381,7 +384,12 @@ public class MemoryManager {
         for (MemoryEntry e : events) {
             e.markLoaded();
             result.add(e);
+            loadedIds.add(e.getId());
         }
+
+        // 3. @reference resolution — scan ALL visible entries for @memory:mXXX
+        //    (not just auto_loaded — schedules, skills etc. can reference other memories)
+        resolveReferences(merged, result, loadedIds, 0);
 
         if (!result.isEmpty()) {
             save();
@@ -390,7 +398,53 @@ public class MemoryManager {
         return result;
     }
 
-    /** Backward-compatible overload */
+    /**
+     * Scan ALL visible entries for @memory:mXXX references.
+     * Referenced entries are added to auto_loaded result.
+     * Recursive: newly added entries are also scanned (depth limited, cycle safe).
+     *
+     * @param allEntries all visible entries to scan for references
+     * @param result     auto_loaded result list (mutable, references added here)
+     * @param loadedIds  already loaded IDs (mutable, prevents cycles)
+     * @param depth      current recursion depth
+     */
+    private void resolveReferences(List<MemoryEntry> allEntries, List<MemoryEntry> result,
+                                    Set<String> loadedIds, int depth) {
+        if (depth >= REFERENCE_MAX_DEPTH) return;
+
+        List<String> newIds = new ArrayList<>();
+        // Scan all visible entries (not just auto_loaded) for references
+        List<MemoryEntry> toScan = depth == 0 ? allEntries : new ArrayList<>(result);
+        for (MemoryEntry e : toScan) {
+            if (e.getContent() == null) continue;
+            Matcher matcher = REFERENCE_PATTERN.matcher(e.getContent());
+            while (matcher.find()) {
+                String refId = matcher.group(1);
+                if (!loadedIds.contains(refId)) {
+                    newIds.add(refId);
+                }
+            }
+        }
+
+        if (newIds.isEmpty()) return;
+
+        List<MemoryEntry> newEntries = new ArrayList<>();
+        for (String refId : newIds) {
+            MemoryEntry ref = get(refId);
+            if (ref != null && !loadedIds.contains(refId)) {
+                ref.markLoaded();
+                newEntries.add(ref);
+                loadedIds.add(refId);
+            }
+        }
+
+        if (!newEntries.isEmpty()) {
+            result.addAll(newEntries);
+            // Depth 1+: only scan newly added entries
+            resolveReferences(allEntries, result, loadedIds, depth + 1);
+        }
+    }
+
     public List<MemoryEntry> getAutoLoadContent(double agentX, double agentY, double agentZ) {
         return getAutoLoadContent(agentX, agentY, agentZ, null);
     }
@@ -398,19 +452,21 @@ public class MemoryManager {
     // --- JSON serialization helpers ---
 
     public JsonObject entryToJson(MemoryEntry entry) {
-        JsonObject obj = GSON.toJsonTree(entry).getAsJsonObject();
+        JsonObject obj = GSON.toJsonTree(entry, MemoryEntry.class).getAsJsonObject();
         // Ensure visibleTo and scope are present
         if (!obj.has("visibleTo") || obj.get("visibleTo").isJsonNull()) {
             obj.add("visibleTo", new JsonArray());
         }
-        // Also include as visible_to for HTTP API consumers
         JsonArray vt = new JsonArray();
         for (String name : entry.getVisibleTo()) {
             vt.add(name);
         }
         obj.add("visible_to", vt);
-        // Ensure derived scope is correct
         obj.addProperty("scope", entry.getScope());
+        // Include location at top level for backward compat
+        if (entry instanceof Locatable loc && loc.getLocation() != null) {
+            obj.add("location", GSON.toJsonTree(loc.getLocation(), MemoryLocation.class));
+        }
         return obj;
     }
 
@@ -447,6 +503,9 @@ public class MemoryManager {
         load();
         LOGGER.info("Memory reloaded: {} entries", entries.size());
     }
+
+    /** Get the configured Gson instance for external use. */
+    public static Gson getGson() { return GSON; }
 
     public int size() {
         return entries.size();

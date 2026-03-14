@@ -5,8 +5,8 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Unified memory entry — stores all types of agent knowledge.
- * Categories: storage, facility, area, event, preference, skill
+ * Base memory entry — stores all types of agent knowledge.
+ * Subclasses add category-specific fields (location, schedule config, etc.).
  */
 public class MemoryEntry {
     private String id;
@@ -14,16 +14,12 @@ public class MemoryEntry {
     private String description;
     private String content;
     private String category;
-    private List<String> tags;
-    private MemoryLocation location;
-    private String scope; // kept for backward compat (derived from visibleTo)
-    private List<String> visibleTo; // empty = global (all agents), non-empty = specific agent names
+    private List<String> visibleTo;
     private String createdAt;
     private String updatedAt;
     private String loadedAt;
 
     public MemoryEntry() {
-        this.tags = new ArrayList<>();
         this.visibleTo = new ArrayList<>();
         String now = Instant.now().toString();
         this.createdAt = now;
@@ -46,31 +42,10 @@ public class MemoryEntry {
     public String getCategory() { return category; }
     public void setCategory(String category) { this.category = category; }
 
-    public List<String> getTags() { return tags; }
-    public void setTags(List<String> tags) { this.tags = tags != null ? tags : new ArrayList<>(); }
-
-    public MemoryLocation getLocation() { return location; }
-    public void setLocation(MemoryLocation location) { this.location = location; }
-
     public String getScope() {
         if (visibleTo == null || visibleTo.isEmpty()) return "global";
         if (visibleTo.size() == 1) return "agent:" + visibleTo.get(0);
         return "agents:" + String.join(",", visibleTo);
-    }
-
-    /** Backward-compatible setter — converts old scope format to visibleTo */
-    public void setScope(String scope) {
-        this.scope = scope;
-        if (scope == null || "global".equals(scope)) {
-            this.visibleTo = new ArrayList<>();
-        } else if (scope.startsWith("agents:")) {
-            String names = scope.substring("agents:".length());
-            this.visibleTo = new ArrayList<>(List.of(names.split(",")));
-        } else if (scope.startsWith("agent:")) {
-            this.visibleTo = new ArrayList<>(List.of(scope.substring("agent:".length())));
-        } else {
-            this.visibleTo = new ArrayList<>();
-        }
     }
 
     public List<String> getVisibleTo() { return visibleTo != null ? visibleTo : List.of(); }
@@ -105,18 +80,13 @@ public class MemoryEntry {
 
     /**
      * Check if this entry matches a keyword search query.
-     * Searches title, description, and tags (case-insensitive).
+     * Searches title and description (case-insensitive).
      */
     public boolean matchesQuery(String query) {
         if (query == null || query.isBlank()) return true;
         String q = query.toLowerCase();
         if (title != null && title.toLowerCase().contains(q)) return true;
         if (description != null && description.toLowerCase().contains(q)) return true;
-        if (tags != null) {
-            for (String tag : tags) {
-                if (tag.toLowerCase().contains(q)) return true;
-            }
-        }
         return false;
     }
 }

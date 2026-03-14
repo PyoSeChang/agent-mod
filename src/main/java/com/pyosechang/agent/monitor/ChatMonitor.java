@@ -74,12 +74,14 @@ public class ChatMonitor {
 
     private static List<String> wrapText(String text, int maxLength) {
         List<String> lines = new java.util.ArrayList<>();
-        while (text.length() > maxLength) {
+        int safety = 0;
+        while (text.length() > maxLength && safety++ < 100) {
             // Try to break at a space
             int breakAt = text.lastIndexOf(' ', maxLength);
             if (breakAt <= 0) breakAt = maxLength;
             lines.add(text.substring(0, breakAt));
-            text = "  " + text.substring(breakAt).stripLeading();
+            text = text.substring(breakAt).stripLeading();
+            if (!text.isEmpty()) text = "  " + text;
         }
         if (!text.isEmpty()) lines.add(text);
         return lines;
