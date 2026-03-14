@@ -27,12 +27,11 @@ public class AgentTickHandler {
         for (AgentContext ctx : manager.getAllAgents()) {
             ServerPlayer agent = ctx.getPlayer();
 
-            // Ensure agent is ticked (gravity, physics, etc.)
-            // AgentPlayer has a double-tick guard, so safe even if entity system also ticks
-            agent.tick();
-
-            // Tick the active async action (movement, mining, etc.)
+            // 1) Tick actions first — PathFollower sets deltaMovement for this tick
             ctx.getActionManager().tick(agent);
+
+            // 2) Then tick agent — aiStep/travel applies deltaMovement with physics
+            agent.tick();
 
             // Sync position to clients every second (20 ticks)
             // ServerPlayer is not in PlayerList, so entity tracker may not reliably

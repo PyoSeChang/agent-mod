@@ -163,3 +163,39 @@ com.pyosechang.agent
 Observation 주입 시: Global + 해당 에이전트 메모리 병합
 GUI 검색: All / Global / 에이전트별 스코프 탭
 ```
+
+---
+
+## Architecture Decisions
+
+### ADR-001: Agent Monitoring UI → TUI via terminal-mod (2026-03-14)
+
+**결정**: 에이전트 모니터링 UI를 Node.js TUI (ink)로 구현하고, terminal-mod 내에서 실행한다.
+
+**배경**: 마인크래프트 채팅창의 한계 (메시지 길이 제한, 히스토리 제한)로 에이전트 모니터링이 어려움. 작업 중단, 추가 지시, 사용량 확인, 세션 재개 등의 기능이 필요.
+
+**검토한 대안**:
+| 대안 | 장점 | 탈락 사유 |
+|------|------|-----------|
+| Forge Screen (Java GUI) | 추가 의존성 없음 | 기능 추가마다 좌표 계산 + 빌드 + 마크 재시작. 개발 비용 선형 증가 |
+| 웹 대시보드 | 설치 비용 0, HTTP 서버 이미 존재 | 마크 밖에서 봐야 함 (alt-tab) |
+| Java TUI (Lanterna) | JAR 포함 가능 | terminal-mod PTY 연동에 추가 작업 필요 |
+| 독립 GUI (Electron/Tauri) | 자유로운 UI | 마크 안에서 볼 수 없음 |
+
+**선택 이유**:
+- 기능이 지속적으로 추가될 예정 → 개발 비용이 핵심 기준
+- ink (React 스타일 선언적 컴포넌트) + flexbox → 기능 추가 = 컴포넌트 추가
+- 핫 리로드 가능 → 마크 재시작 불필요
+- npm 위젯 생태계 활용
+- agent-runtime이 이미 Node.js → npm install에 TUI 포함, 추가 설치 비용 0
+
+**트레이드오프**: terminal-mod가 필수 의존성이 됨.
+
+**구조**:
+```
+agent-runtime/
+└── src/tui/          # TUI 코드 (ink)
+      └── HTTP ──→ AgentHttpServer (기존 브릿지)
+
+terminal-mod (마크 내 터미널) → $ agent-tui 실행
+```

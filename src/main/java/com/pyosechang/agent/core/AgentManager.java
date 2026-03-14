@@ -49,6 +49,7 @@ public class AgentManager {
 
         agentPlayer.setPos(pos.getX() + 0.5, pos.getY(), pos.getZ() + 0.5);
         agentPlayer.setInvulnerable(true);
+        agentPlayer.setGameMode(net.minecraft.world.level.GameType.SURVIVAL);
 
         // Load persona from .agent/agents/{name}/PERSONA.md
         Path personaFile = FMLPaths.GAMEDIR.get().resolve(".agent/agents/" + name + "/PERSONA.md");

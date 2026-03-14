@@ -2,17 +2,20 @@ package com.pyosechang.agent.core.pathfinding;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.phys.Vec3;
 
 import java.util.Collections;
 import java.util.List;
 
 /**
- * Tick-based path follower that smoothly moves the agent along a path.
+ * Tick-based path follower using deltaMovement (like vanilla MoveControl).
+ * Sets movement velocity each tick; aiStep/travel applies it with physics.
  */
 public class PathFollower {
 
     private static final double MOVE_SPEED = 0.215; // ~4.3 blocks/sec at 20 tps
-    private static final double WAYPOINT_THRESHOLD = 0.2;
+    private static final double WAYPOINT_THRESHOLD = 0.3;
+    private static final double JUMP_VELOCITY = 0.42; // vanilla jump strength
 
     private List<BlockPos> path = Collections.emptyList();
     private int currentIndex = 0;
@@ -32,7 +35,8 @@ public class PathFollower {
     }
 
     /**
-     * Called every server tick to move the agent toward the next waypoint.
+     * Called every server tick. Sets deltaMovement toward the next waypoint,
+     * letting aiStep/travel handle actual movement with physics.
      */
     public void tick(ServerPlayer agent) {
         if (!active || currentIndex >= path.size()) {
@@ -41,7 +45,6 @@ public class PathFollower {
         }
 
         BlockPos target = path.get(currentIndex);
-        // Target center of block
         double tx = target.getX() + 0.5;
         double ty = target.getY();
         double tz = target.getZ() + 0.5;
@@ -50,29 +53,32 @@ public class PathFollower {
         double dy = ty - agent.getY();
         double dz = tz - agent.getZ();
         double distHorizontal = Math.sqrt(dx * dx + dz * dz);
-        double dist3d = Math.sqrt(dx * dx + dy * dy + dz * dz);
 
-        if (dist3d < WAYPOINT_THRESHOLD) {
-            // Snap to waypoint and advance
-            agent.setPos(tx, ty, tz);
+        // Arrived at waypoint — advance to next
+        if (distHorizontal < WAYPOINT_THRESHOLD && Math.abs(dy) < 1.0) {
             currentIndex++;
             if (currentIndex >= path.size()) {
                 active = false;
+                agent.setDeltaMovement(Vec3.ZERO);
             }
             return;
         }
 
-        // Smoothly interpolate toward target
-        if (dist3d <= MOVE_SPEED) {
-            // Close enough to reach in one tick
-            agent.setPos(tx, ty, tz);
-        } else {
-            double ratio = MOVE_SPEED / dist3d;
-            double newX = agent.getX() + dx * ratio;
-            double newY = agent.getY() + dy * ratio;
-            double newZ = agent.getZ() + dz * ratio;
-            agent.setPos(newX, newY, newZ);
+        // Calculate horizontal movement direction
+        double moveX = 0;
+        double moveZ = 0;
+        if (distHorizontal > 0.01) {
+            moveX = (dx / distHorizontal) * MOVE_SPEED;
+            moveZ = (dz / distHorizontal) * MOVE_SPEED;
         }
+
+        // Jump if target is above and agent is on ground
+        double moveY = agent.getDeltaMovement().y; // preserve gravity
+        if (dy > 0.5 && agent.onGround()) {
+            moveY = JUMP_VELOCITY;
+        }
+
+        agent.setDeltaMovement(new Vec3(moveX, moveY, moveZ));
     }
 
     /**

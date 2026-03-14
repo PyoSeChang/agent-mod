@@ -1,5 +1,28 @@
 # CHANGELOG
 
+## v0.4.1 — 2026-03-14 `[body, actions]`
+
+PathFollower를 setPos 방식에서 deltaMovement 방식으로 전환 (바닐라 MoveControl 패턴). aiStep/travel과 협력하여 물리 기반 이동. MineBlockAction에 채굴 후 아이템 회수 이동 추가.
+
+### 변경 사항
+
+**`body`**
+- `AgentManager.spawn()`: `setGameMode(GameType.SURVIVAL)` 강제 설정 — 서버 gameType(creative 등)에 관계없이 에이전트는 항상 survival. creative 모드에서 `destroyBlock`이 아이템 드롭하지 않는 문제 해결
+- `PathFollower.java` 전면 재작성: `setPos()` 직접 위치 지정 → `setDeltaMovement()` 속도 설정 방식. aiStep/travel이 물리(충돌, 중력) 적용하여 실제 이동 처리
+  - 바닐라 MoveControl 패턴 채용: PathFollower가 방향+속도 설정 → travel()이 적용
+  - 점프: 다음 waypoint가 위에 있고 onGround일 때 JUMP_VELOCITY(0.42) 설정
+  - waypoint 도달 판정: 수평 거리 < 0.3 && 수직 거리 < 1.0
+- `AgentTickHandler`: tick 순서 변경 — actionManager.tick() → agent.tick(). PathFollower가 deltaMovement를 먼저 설정하고, aiStep/travel이 이를 적용
+
+**`actions`**
+- `MineBlockAction`: 상태 머신 추가 (MINING → COLLECTING). 채굴 완료 후 에이전트-블록 거리 > 2블록이면 블록 위치까지 pathfinding 이동하여 드롭 아이템 회수. 2블록 이내면 즉시 완료 (tick handler 자동 회수)
+
+### 설계 판단
+
+- **setPos vs deltaMovement**: 기존 setPos 방식은 aiStep의 물리 엔진과 매 틱 충돌 — aiStep이 중력(deltaMovement.y 누적)으로 아래로 끌어당기고 setPos가 다시 올리는 줄다리기 발생. deltaMovement 방식은 물리 엔진과 협력하여 중력, 충돌을 자연스럽게 처리
+- **tick 순서 반전**: PathFollower가 deltaMovement를 설정한 후 aiStep/travel이 적용해야 하므로 actionManager.tick() → agent.tick() 순서로 변경
+- **MineBlockAction 아이템 회수**: mining reach(~4.5블록) > pickup range(2블록) 차이로 먼 블록 채굴 시 드롭 아이템 미회수. 채굴 완료 후 블록 위치로 이동하여 tick handler의 자동 회수에 맡김
+
 ## v0.4.0 — 2026-03-14 `[body, actions, infra]`
 
 FakePlayer → AgentPlayer(ServerPlayer subclass) 전환. 에이전트에 실제 플레이어 물리(중력, 충돌), 장비 동기화, 아이템 픽업을 부여.
