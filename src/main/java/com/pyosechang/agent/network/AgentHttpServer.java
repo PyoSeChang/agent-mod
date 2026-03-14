@@ -15,7 +15,6 @@ import com.pyosechang.agent.core.action.ActionRegistry;
 import com.pyosechang.agent.core.action.ActiveActionManager;
 import com.pyosechang.agent.core.action.AsyncAction;
 import com.pyosechang.agent.core.memory.MemoryEntry;
-import com.pyosechang.agent.core.memory.MemoryLocation;
 import com.pyosechang.agent.core.memory.MemoryManager;
 import com.pyosechang.agent.core.schedule.*;
 import com.pyosechang.agent.monitor.TerminalIntegration;
@@ -631,34 +630,13 @@ public class AgentHttpServer {
         if (!assertMethod(exchange, "POST")) return;
         try {
             JsonObject body = readBody(exchange);
-            String title = body.get("title").getAsString();
-            String description = body.has("description") ? body.get("description").getAsString() : "";
-            String content = body.has("content") ? body.get("content").getAsString() : "";
-            String category = body.has("category") ? body.get("category").getAsString() : "event";
-            List<String> tags = new ArrayList<>();
-            if (body.has("tags")) {
-                for (JsonElement el : body.getAsJsonArray("tags")) {
-                    tags.add(el.getAsString());
-                }
+
+            // Normalize visible_to → visibleTo for Gson
+            if (body.has("visible_to") && !body.has("visibleTo")) {
+                body.add("visibleTo", body.get("visible_to"));
             }
 
-            MemoryLocation location = null;
-            if (body.has("location") && body.get("location").isJsonObject()) {
-                location = MemoryLocation.fromJson(body.getAsJsonObject("location"));
-            }
-
-            String scope = body.has("scope") ? body.get("scope").getAsString() : "global";
-
-            List<String> visibleTo = null;
-            if (body.has("visible_to") && body.get("visible_to").isJsonArray()) {
-                visibleTo = new ArrayList<>();
-                for (JsonElement el : body.getAsJsonArray("visible_to")) {
-                    visibleTo.add(el.getAsString());
-                }
-            }
-
-            MemoryEntry entry = MemoryManager.getInstance().create(
-                title, description, content, category, tags, location, scope, visibleTo);
+            MemoryEntry entry = MemoryManager.getInstance().createFromJson(body);
 
             JsonObject result = new JsonObject();
             result.addProperty("ok", true);
@@ -813,7 +791,6 @@ public class AgentHttpServer {
             ScheduleConfig config = new ScheduleConfig();
             config.setType(type);
             config.setTargetAgent(targetAgent);
-            config.setPromptMessage(message);
             config.setEnabled(enabled);
 
             switch (type) {
@@ -850,10 +827,10 @@ public class AgentHttpServer {
             MinecraftServer server = AgentManager.getInstance().getServer();
             long currentTick = server != null ? server.getTickCount() : 0;
 
-            ScheduleEntry se = ScheduleManager.getInstance().create(title, config, currentTick);
+            com.pyosechang.agent.core.memory.ScheduleMemory sm = ScheduleManager.getInstance().create(title, message, config, currentTick);
             JsonObject result = new JsonObject();
             result.addProperty("ok", true);
-            result.add("entry", se.toSummaryJson());
+            result.add("entry", ScheduleManager.toSummaryJson(sm));
             sendJson(exchange, 200, result);
         } catch (IllegalArgumentException e) {
             sendError(exchange, 400, "Invalid schedule type: " + e.getMessage());
@@ -867,14 +844,14 @@ public class AgentHttpServer {
         try {
             JsonObject body = readBody(exchange);
             String id = body.get("id").getAsString();
-            ScheduleEntry se = ScheduleManager.getInstance().update(id, body);
-            if (se == null) {
+            com.pyosechang.agent.core.memory.ScheduleMemory sm = ScheduleManager.getInstance().update(id, body);
+            if (sm == null) {
                 sendError(exchange, 404, "Schedule not found: " + id);
                 return;
             }
             JsonObject result = new JsonObject();
             result.addProperty("ok", true);
-            result.add("entry", se.toSummaryJson());
+            result.add("entry", ScheduleManager.toSummaryJson(sm));
             sendJson(exchange, 200, result);
         } catch (Exception e) {
             sendError(exchange, 500, e.getMessage());
@@ -903,12 +880,12 @@ public class AgentHttpServer {
             String targetAgent = body.has("target_agent") ? body.get("target_agent").getAsString() : null;
             boolean enabledOnly = body.has("enabled_only") && body.get("enabled_only").getAsBoolean();
 
-            List<ScheduleEntry> schedules = ScheduleManager.getInstance().list(targetAgent, enabledOnly);
+            List<com.pyosechang.agent.core.memory.ScheduleMemory> schedules = ScheduleManager.getInstance().list(targetAgent, enabledOnly);
             JsonObject result = new JsonObject();
             result.addProperty("ok", true);
             JsonArray arr = new JsonArray();
-            for (ScheduleEntry se : schedules) {
-                arr.add(se.toSummaryJson());
+            for (com.pyosechang.agent.core.memory.ScheduleMemory sm : schedules) {
+                arr.add(ScheduleManager.toSummaryJson(sm));
             }
             result.add("schedules", arr);
             result.addProperty("count", schedules.size());
@@ -923,19 +900,19 @@ public class AgentHttpServer {
         try {
             JsonObject body = readBody(exchange);
             String id = body.get("id").getAsString();
-            ScheduleEntry se = ScheduleManager.getInstance().get(id);
-            if (se == null) {
+            com.pyosechang.agent.core.memory.ScheduleMemory sm = ScheduleManager.getInstance().get(id);
+            if (sm == null) {
                 sendError(exchange, 404, "Schedule not found: " + id);
                 return;
             }
             JsonObject result = new JsonObject();
             result.addProperty("ok", true);
-            JsonObject schedule = se.toSummaryJson();
+            JsonObject schedule = ScheduleManager.toSummaryJson(sm);
             // Add observer states if OBSERVER type
-            if (se.getConfig().getType() == ScheduleConfig.Type.OBSERVER) {
+            if (sm.getConfig().getType() == ScheduleConfig.Type.OBSERVER) {
                 JsonObject states = ObserverManager.getInstance().getStates(id);
                 schedule.addProperty("observers_triggered", states.get("triggered_count").getAsInt());
-                schedule.addProperty("observers_total", se.getConfig().getObservers().size());
+                schedule.addProperty("observers_total", sm.getConfig().getObservers().size());
             }
             result.add("schedule", schedule);
             sendJson(exchange, 200, result);
@@ -953,8 +930,8 @@ public class AgentHttpServer {
         try {
             JsonObject body = readBody(exchange);
             String scheduleId = body.get("schedule_id").getAsString();
-            ScheduleEntry se = ScheduleManager.getInstance().get(scheduleId);
-            if (se == null || se.getConfig().getType() != ScheduleConfig.Type.OBSERVER) {
+            com.pyosechang.agent.core.memory.ScheduleMemory sm = ScheduleManager.getInstance().get(scheduleId);
+            if (sm == null || sm.getConfig().getType() != ScheduleConfig.Type.OBSERVER) {
                 sendError(exchange, 404, "OBSERVER schedule not found: " + scheduleId);
                 return;
             }
@@ -965,10 +942,9 @@ public class AgentHttpServer {
             }
 
             // Add to config
-            List<ObserverDef> all = new ArrayList<>(se.getConfig().getObservers());
+            List<ObserverDef> all = new ArrayList<>(sm.getConfig().getObservers());
             all.addAll(newObservers);
-            se.getConfig().setObservers(all);
-            se.updateConfig(se.getConfig());
+            sm.getConfig().setObservers(all);
 
             // Register with ObserverManager
             ObserverManager.getInstance().addObservers(scheduleId, newObservers);
@@ -989,8 +965,8 @@ public class AgentHttpServer {
         try {
             JsonObject body = readBody(exchange);
             String scheduleId = body.get("schedule_id").getAsString();
-            ScheduleEntry se = ScheduleManager.getInstance().get(scheduleId);
-            if (se == null || se.getConfig().getType() != ScheduleConfig.Type.OBSERVER) {
+            com.pyosechang.agent.core.memory.ScheduleMemory sm = ScheduleManager.getInstance().get(scheduleId);
+            if (sm == null || sm.getConfig().getType() != ScheduleConfig.Type.OBSERVER) {
                 sendError(exchange, 404, "OBSERVER schedule not found: " + scheduleId);
                 return;
             }
@@ -1003,11 +979,10 @@ public class AgentHttpServer {
 
             // Remove from config
             java.util.Set<BlockPos> posSet = new java.util.HashSet<>(positions);
-            List<ObserverDef> remaining = se.getConfig().getObservers().stream()
+            List<ObserverDef> remaining = sm.getConfig().getObservers().stream()
                 .filter(def -> !posSet.contains(def.getBlockPos()))
                 .collect(java.util.stream.Collectors.toList());
-            se.getConfig().setObservers(remaining);
-            se.updateConfig(se.getConfig());
+            sm.getConfig().setObservers(remaining);
 
             // Unregister from ObserverManager
             ObserverManager.getInstance().removeObservers(scheduleId, positions);

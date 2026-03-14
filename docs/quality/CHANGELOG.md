@@ -1,5 +1,156 @@
 # CHANGELOG
 
+## v0.5.1 — 2026-03-14 `[memory, schedule, brain, infra]`
+
+Memory 데이터 모델 재설계 — 카테고리별 서브클래스, Location 단순화, Schedule content/config 분리, @reference 강제 로드, GUI mention 피커.
+
+### 변경 사항
+
+**`memory`**
+- `MemoryEntry` base 정리: `tags`, `location`, `scope` 필드 제거. base는 id/title/desc/content/category/visibleTo/timestamps만 보유
+- `preference` 카테고리 삭제 — 카테고리: storage, facility, area, event, skill, schedule
+- `MemoryLocation` → interface로 변환: `distanceTo()`, `isWithinRange()`, `getType()`
+- `PointLocation` 신규: `(x, y, z)` — radius 제거, 미사용 필드 JSON 노이즈 해결 (I-016)
+- `AreaLocation` 신규: `(x1, y1, z1, x2, y2, z2)` — 단일 y 대신 y1/y2
+- `Locatable` interface: `getLocation()` — 위치 있는 카테고리 구분
+- 카테고리별 서브클래스 6개:
+  - `StorageMemory` — PointLocation 필수, Locatable
+  - `FacilityMemory` — MemoryLocation (point 또는 area), Locatable
+  - `AreaMemory` — AreaLocation 필수, Locatable
+  - `EventMemory` — MemoryLocation 선택, Locatable
+  - `SkillMemory` — 추가 필드 없음
+  - `ScheduleMemory` — ScheduleConfig 일급 객체 필드, content = 프롬프트 메시지
+- `MemoryEntryTypeAdapter`: category 기반 다형성 역직렬화
+  - serialize/deserialize에서 **모든 base 필드를 수동으로 처리** (`fillBaseFields`) — Gson reflection에 부모 클래스 필드를 맡기지 않음
+  - old scope→visibleTo 마이그레이션, old schedule content JSON→config 변환
+- `MemoryLocationTypeAdapter`: type 기반 dispatch, old format 호환 (radius 무시, 단일 y → y1=y2)
+- `MemoryManager` 리팩토링:
+  - Gson에 TypeAdapter 등록 (MemoryEntry, MemoryLocation, ScheduleConfig)
+  - `createFromJson(JsonObject)` 팩토리 — 카테고리별 서브클래스 자동 생성
+  - `@memory:mXXX` 참조 재귀 탐색 (`resolveReferences`, depth 3, 순환 방지)
+  - `instanceof Locatable` 패턴으로 위치 접근
+  - JSON 루트 v2 포맷 `{"version":2,"entries":[...]}`, v1 bare array 자동 감지 마이그레이션
+  - preference auto-load 로직 제거
+
+**`schedule`**
+- `ScheduleEntry.java` 삭제 — `ScheduleMemory`로 대체
+- `ScheduleConfig`: `promptMessage` 필드 제거 — 프롬프트는 `ScheduleMemory.content`에 저장
+  - `@SerializedName` + `alternate` 추가 (target_agent, time_of_day 등 snake_case/camelCase 호환)
+- `ScheduleConfigTypeAdapter` 신규: Gson reflection 대신 기존 수동 `toJson()/fromJson()` 강제 사용
+- `ObserverDef`: `@SerializedName(value="event", alternate={"eventType"})` — 키 이름 통일
+- `ScheduleManager`: `ScheduleEntry` → `ScheduleMemory` 직접 사용
+  - `create(title, message, config, tick)` — message를 content에 저장
+  - `trigger()`: `sm.getContent()`에서 프롬프트 읽기
+  - `toSummaryJson()`: description + content(prompt) 포함
+  - null eventType 방어 로직 추가
+- `ObserverManager`: `ScheduleEntry` → `ScheduleMemory` 전환, null eventType skip + warn
+
+**`brain`**
+- `mcp-server.ts`:
+  - `remember`: `tags` 파라미터 제거, `preference` 카테고리 제거, location에 y1/y2 추가, `@memory:mXXX` 참조 안내
+  - `update_memory`: `tags` 파라미터 제거
+  - `search_memory`: 검색 대상 "title and description"
+- `manager-mcp-server.ts`: `tags`/`preference` 제거, location y1/y2 추가
+- `prompt.ts`: preference 언급 제거, `@memory:mXXX` 참조 auto-load 안내
+
+**`infra`**
+- `AgentHttpServer`:
+  - `handleMemoryCreate`: `createFromJson(body)` 단일 호출
+  - schedule 핸들러: `ScheduleMemory` 직접 사용
+- `GuiLayout.java` 신규: 공용 레이아웃 상수 (`LABEL_GAP=12`, `ROW_H=36`, `FIELD_H=16` 등)
+- `MemoryEditScreen` 전면 재작성:
+  - tags 입력 제거
+  - 카테고리에 따라 location 표시/숨김 (skill → location 숨김)
+  - Location: "none" 제거, Point/Area 사이클 버튼
+  - Point: X, Y, Z (3필드), Area: X1/Y1/Z1 + X2/Y2/Z2 (6필드 2행)
+  - `@` mention 피커: 트리거 키로 검색 팝업, ↑↓/Enter 선택, `@[Title]` 표시 ↔ `@memory:mXXX` 저장
+  - `GuiLayout` 상수 기반 레이아웃
+- `MemoryListScreen`: preference 카테고리 제거
+
+### 설계 판단
+
+- **Gson reflection 배제**: Gson reflection이 Java 모듈 시스템 환경(Forge 1.20.1)에서 부모 클래스 private 필드 접근 실패, 필드명↔JSON 키 불일치 문제 유발. `MemoryEntryTypeAdapter`에서 base 필드를 **전부 수동으로 읽고 씀** (`fillBaseFields`). `ScheduleConfigTypeAdapter`로 config도 수동 `toJson()/fromJson()` 강제. 서브클래스 고유 필드만 Gson reflection 허용
+- **Schedule content = 프롬프트**: `ScheduleConfig.promptMessage` 삭제. `ScheduleMemory.content`가 에이전트에게 보내는 메시지, `description`이 사람용 설명, `config`는 순수 트리거 메커니즘
+- **@reference 강제 로드**: content에 `@memory:m001` → auto_loaded에 강제 포함. depth 3 재귀, `loadedIds` Set으로 순환 방지
+- **@[Title] 표시 형식**: GUI에서 `@[Title]`로 표시하되 저장 시 `@memory:mXXX`로 변환. 대괄호가 경계 구분자 역할 — 공백 포함 제목도 파싱 가능
+- **Location 단순화**: radius 제거 (사용처 없었음), area에 y1/y2 추가 (3D 볼륨)
+
+### 해결 이슈
+
+- [x] `I-016`: MemoryLocation area 타입에서 미사용 필드(x, z, radius)가 0으로 직렬화 — PointLocation/AreaLocation 분리
+- [x] `I-017`: Gson reflection이 ObserverDef.eventType을 "eventType" 키로 직렬화 → 수동 toJson의 "event" 키와 불일치 — `ScheduleConfigTypeAdapter` + `@SerializedName`
+- [x] `I-018`: Gson reflection이 부모 클래스(MemoryEntry) private 필드 접근 실패 → content 소실 — `fillBaseFields()` 수동 처리
+
+### 파일 변경 요약
+
+| 구분 | 파일 |
+|------|------|
+| 신규 (14) | `PointLocation`, `AreaLocation`, `Locatable`, `MemoryLocationTypeAdapter`, `MemoryEntryTypeAdapter`, `StorageMemory`, `FacilityMemory`, `AreaMemory`, `EventMemory`, `SkillMemory`, `ScheduleMemory`, `ScheduleConfigTypeAdapter`, `GuiLayout` |
+| 수정 (11) | `MemoryEntry`, `MemoryLocation`, `MemoryManager`, `ScheduleConfig`, `ScheduleManager`, `ObserverManager`, `ObserverDef`, `AgentHttpServer`, `MemoryEditScreen`, `MemoryListScreen`, `CLAUDE.md` |
+| MCP 수정 (3) | `mcp-server.ts`, `manager-mcp-server.ts`, `prompt.ts` |
+| 삭제 (1) | `ScheduleEntry` |
+
+---
+
+## v0.5.0 — 2026-03-13 `[schedule, brain, infra]`
+
+스케줄 시스템 + Agent Manager — 시간/간격/옵저버 기반 자동 작업 트리거, 보디리스 매니저 런타임.
+
+### 변경 사항
+
+**`schedule`**
+- `ScheduleEntry.java` 신규: MemoryEntry 래퍼, category="schedule", config JSON을 content에 직렬화
+- `ScheduleConfig.java` 신규: 트리거 설정 (TYPE: TIME_OF_DAY, INTERVAL, OBSERVER)
+  - TIME_OF_DAY: 게임 시각(0-23999) + repeatDays
+  - INTERVAL: N틱마다 반복 + repeat 플래그
+  - OBSERVER: 옵저버 목록 + threshold
+- `ObserverDef.java` 신규: 개별 옵저버 (위치 + 이벤트 타입 + 조건)
+- `ScheduleManager.java` 신규: 싱글턴, CRUD + 틱 평가 + 트리거 라우팅
+  - `init()`: MemoryManager에서 schedule 엔트리 로드 → 캐시
+  - `tick()`: TIME_OF_DAY/INTERVAL 매 틱 체크
+  - `trigger()`: Manager 런타임 경유 또는 직접 에이전트 intervention
+- `ObserverManager.java` 신규: Forge 이벤트 핸들러, 옵저버 레지스트리
+  - 지원 이벤트: crop_grow, sapling_grow, block_break, block_place, baby_spawn, entity_death, explosion
+  - 조건 매칭: `age=7`, `type=zombie` 등 BlockState 속성 비교
+  - threshold 기반 트리거: N개 옵저버 충족 시 ScheduleManager에 알림
+- `ManagerContext.java` 신규: Manager 런타임용 보디리스 컨텍스트 (InterventionQueue, sessionId)
+
+**`brain`**
+- `manager-index.ts` 신규: Agent Manager SDK 루프 (Claude Agent SDK, maxTurns=50)
+- `manager-mcp-server.ts` 신규: Manager MCP 도구
+  - Schedule CRUD: create_schedule, update_schedule, delete_schedule, list_schedules, get_schedule
+  - Observer 관리: add_observers, remove_observers, list_observers
+  - Agent 관리: list_agents, spawn_agent, despawn_agent, tell_agent, get_agent_status
+  - Memory (global): search_memory, remember, recall
+  - Game state: get_world_time, get_supported_events
+- `manager-prompt.ts` 신규: Manager 시스템 프롬프트
+
+**`infra`**
+- `ManagerRuntimeManager.java` 신규: Manager 런타임 프로세스 관리 (launch/stop)
+- `ManagerCommand.java` 신규: `/am <message>` — Agent Manager에게 메시지 전달
+- `AgentHttpServer`: Schedule/Observer/Manager 엔드포인트 추가
+  - `/schedule/create`, `/schedule/update`, `/schedule/delete`, `/schedule/list`, `/schedule/get`
+  - `/observer/add`, `/observer/remove`, `/observer/list`
+  - `/manager/intervention`, `/manager/world_time`, `/manager/events`
+- `AgentMod`: 서버 시작 시 `ScheduleManager.init()`, 틱에서 `ScheduleManager.tick()` 호출
+- `AgentTickHandler`: ScheduleManager 틱 평가 연동
+
+### 설계 판단
+
+- **Schedule = Memory**: 스케줄을 MemoryEntry(category="schedule")로 통합. 별도 저장소 불필요, MemoryManager의 CRUD/persist/visibleTo 재사용
+- **Agent Manager = 보디리스**: FakePlayer 없음, 행동 도구 없음. 스케줄 등록/관리 + 에이전트에게 메시지 전달만 담당
+- **Observer = Forge 이벤트**: 월드에 블록/엔티티를 배치하지 않고 Forge 이벤트 구독으로 감지. InvisibleObserver 패턴
+- **트리거 라우팅**: Manager 런타임이 있으면 intervention 큐로 전달, 없으면 직접 에이전트 런타임 launch
+
+### 파일 변경 요약
+
+| 구분 | 파일 |
+|------|------|
+| 신규 (10) | `ScheduleEntry`, `ScheduleConfig`, `ObserverDef`, `ScheduleManager`, `ObserverManager`, `ManagerContext`, `ManagerRuntimeManager`, `ManagerCommand`, `manager-index.ts`, `manager-mcp-server.ts`, `manager-prompt.ts` |
+| 수정 (5) | `AgentMod`, `AgentTickHandler`, `AgentHttpServer`, `MemoryManager`, `CLAUDE.md` |
+
+---
+
 ## v0.3.2 — 2026-03-13 `[multi-agent]`
 
 명령어 구조 변경 — `/agent <subcommand> <name>` → `/agent <name> <subcommand|message>`. 에이전트 지정을 앞에 두고, 메시지는 subcommand 없이 직접 전달.

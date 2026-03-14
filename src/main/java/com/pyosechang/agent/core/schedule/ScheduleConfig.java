@@ -2,13 +2,14 @@ package com.pyosechang.agent.core.schedule;
 
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
+import com.google.gson.annotations.SerializedName;
 
 import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Trigger configuration for a schedule entry.
- * Serialized as JSON inside MemoryEntry.content.
+ * Trigger configuration for a schedule.
+ * Pure trigger mechanics — no prompt message (stored in ScheduleMemory.content).
  */
 public class ScheduleConfig {
 
@@ -17,18 +18,24 @@ public class ScheduleConfig {
     }
 
     private Type type;
+    @SerializedName(value = "target_agent", alternate = {"targetAgent"})
     private String targetAgent;
-    private String promptMessage;
     private boolean enabled = true;
+    @SerializedName(value = "registered_tick", alternate = {"registeredTick"})
     private long registeredTick;
+    @SerializedName(value = "last_triggered_tick", alternate = {"lastTriggeredTick"})
     private long lastTriggeredTick = -1;
+    @SerializedName(value = "last_triggered_day", alternate = {"lastTriggeredDay"})
     private long lastTriggeredDay = -1;
 
     // TIME_OF_DAY fields
+    @SerializedName(value = "time_of_day", alternate = {"timeOfDay"})
     private int timeOfDay;      // 0-23999
+    @SerializedName(value = "repeat_days", alternate = {"repeatDays"})
     private int repeatDays = 1; // 0=once, N=every N days
 
     // INTERVAL fields
+    @SerializedName(value = "interval_ticks", alternate = {"intervalTicks"})
     private int intervalTicks;  // minimum 20
     private boolean repeat = true;
 
@@ -45,9 +52,6 @@ public class ScheduleConfig {
 
     public String getTargetAgent() { return targetAgent; }
     public void setTargetAgent(String targetAgent) { this.targetAgent = targetAgent; }
-
-    public String getPromptMessage() { return promptMessage; }
-    public void setPromptMessage(String promptMessage) { this.promptMessage = promptMessage; }
 
     public boolean isEnabled() { return enabled; }
     public void setEnabled(boolean enabled) { this.enabled = enabled; }
@@ -85,7 +89,6 @@ public class ScheduleConfig {
         JsonObject obj = new JsonObject();
         obj.addProperty("type", type.name());
         obj.addProperty("target_agent", targetAgent);
-        obj.addProperty("prompt_message", promptMessage);
         obj.addProperty("enabled", enabled);
         obj.addProperty("registered_tick", registeredTick);
         obj.addProperty("last_triggered_tick", lastTriggeredTick);
@@ -116,7 +119,6 @@ public class ScheduleConfig {
         ScheduleConfig config = new ScheduleConfig();
         config.type = Type.valueOf(obj.get("type").getAsString());
         config.targetAgent = obj.has("target_agent") ? obj.get("target_agent").getAsString() : "";
-        config.promptMessage = obj.has("prompt_message") ? obj.get("prompt_message").getAsString() : "";
         config.enabled = !obj.has("enabled") || obj.get("enabled").getAsBoolean();
         config.registeredTick = obj.has("registered_tick") ? obj.get("registered_tick").getAsLong() : 0;
         config.lastTriggeredTick = obj.has("last_triggered_tick") ? obj.get("last_triggered_tick").getAsLong() : -1;

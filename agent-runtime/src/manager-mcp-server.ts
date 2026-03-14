@@ -138,19 +138,24 @@ server.tool("get_agent_status", "Get agent status (position, runtime, action)", 
 
 server.tool("search_memory", "Search memories by keyword and/or category", {
   query: z.string().optional().describe("Keyword to search"),
-  category: z.enum(["storage", "facility", "area", "event", "preference", "skill"]).optional(),
+  category: z.enum(["storage", "facility", "area", "event", "skill"]).optional(),
   scope: z.string().optional().describe("'all', 'global', 'agent:name', 'only:name'"),
 }, async (params) => ({
   content: [{ type: "text" as const, text: await managerBridgeFetch("/memory/search", "POST", params) }],
 }));
 
-server.tool("remember", "Save a global memory", {
+server.tool("remember", "Save a global memory. Use @memory:mXXX in content to reference other memories.", {
   title: z.string(),
   description: z.string(),
   content: z.string(),
-  category: z.enum(["storage", "facility", "area", "event", "preference", "skill"]),
-  tags: z.array(z.string()).optional(),
+  category: z.enum(["storage", "facility", "area", "event", "skill"]),
   visible_to: z.array(z.string()).optional().describe("Agent names. Empty = global"),
+  location: z.object({
+    type: z.enum(["point", "area"]),
+    x: z.number().optional(), y: z.number().optional(), z: z.number().optional(),
+    x1: z.number().optional(), y1: z.number().optional(), z1: z.number().optional(),
+    x2: z.number().optional(), y2: z.number().optional(), z2: z.number().optional(),
+  }).optional().describe("point: (x,y,z). area: (x1,y1,z1)-(x2,y2,z2). Required for storage/area, optional for facility/event"),
 }, async (params) => ({
   content: [{ type: "text" as const, text: await managerBridgeFetch("/memory/create", "POST", params) }],
 }));

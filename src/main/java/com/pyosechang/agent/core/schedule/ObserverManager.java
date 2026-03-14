@@ -4,6 +4,7 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import com.mojang.logging.LogUtils;
 import com.pyosechang.agent.AgentMod;
+import com.pyosechang.agent.core.memory.ScheduleMemory;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.properties.Property;
@@ -56,14 +57,18 @@ public class ObserverManager {
     public static ObserverManager getInstance() { return INSTANCE; }
 
     /** Register all observers for a schedule */
-    public void registerSchedule(ScheduleEntry se) {
-        ScheduleConfig config = se.getConfig();
+    public void registerSchedule(ScheduleMemory sm) {
+        ScheduleConfig config = sm.getConfig();
         if (config.getType() != ScheduleConfig.Type.OBSERVER) return;
 
-        String scheduleId = se.getId();
+        String scheduleId = sm.getId();
         triggeredMap.putIfAbsent(scheduleId, ConcurrentHashMap.newKeySet());
 
         for (ObserverDef def : config.getObservers()) {
+            if (def.getEventType() == null || def.getEventType().isEmpty()) {
+                LOGGER.warn("Skipping observer with null/empty eventType in schedule '{}'", scheduleId);
+                continue;
+            }
             registry.computeIfAbsent(def.getEventType(), k -> new ConcurrentHashMap<>())
                 .computeIfAbsent(def.getBlockPos(), k -> new ArrayList<>())
                 .add(new ObserverRegistration(scheduleId, def, false));
@@ -116,13 +121,13 @@ public class ObserverManager {
     /** Get observer states for a schedule */
     public JsonObject getStates(String scheduleId) {
         Set<BlockPos> triggered = triggeredMap.getOrDefault(scheduleId, Set.of());
-        ScheduleEntry se = ScheduleManager.getInstance().get(scheduleId);
+        ScheduleMemory sm = ScheduleManager.getInstance().get(scheduleId);
 
         JsonObject result = new JsonObject();
         JsonArray observersArr = new JsonArray();
 
-        if (se != null && se.getConfig().getType() == ScheduleConfig.Type.OBSERVER) {
-            for (ObserverDef def : se.getConfig().getObservers()) {
+        if (sm != null && sm.getConfig().getType() == ScheduleConfig.Type.OBSERVER) {
+            for (ObserverDef def : sm.getConfig().getObservers()) {
                 JsonObject obs = def.toJson();
                 obs.addProperty("triggered", triggered.contains(def.getBlockPos()));
                 observersArr.add(obs);
@@ -131,14 +136,14 @@ public class ObserverManager {
 
         result.add("observers", observersArr);
         result.addProperty("triggered_count", triggered.size());
-        result.addProperty("threshold", se != null ? se.getConfig().getThreshold() : 0);
+        result.addProperty("threshold", sm != null ? sm.getConfig().getThreshold() : 0);
         return result;
     }
 
     /** Get total observer count for a schedule */
     public int getObserverCount(String scheduleId) {
-        ScheduleEntry se = ScheduleManager.getInstance().get(scheduleId);
-        return se != null ? se.getConfig().getObservers().size() : 0;
+        ScheduleMemory sm = ScheduleManager.getInstance().get(scheduleId);
+        return sm != null ? sm.getConfig().getObservers().size() : 0;
     }
 
     // --- Event processing ---
@@ -169,7 +174,7 @@ public class ObserverManager {
             triggered.add(pos);
 
             // Check threshold
-            ScheduleEntry se = ScheduleManager.getInstance().get(reg.scheduleId());
+            ScheduleMemory se = ScheduleManager.getInstance().get(reg.scheduleId());
             if (se != null) {
                 int threshold = se.getConfig().getThreshold();
                 if (triggered.size() >= threshold) {
@@ -202,7 +207,7 @@ public class ObserverManager {
                 Set<BlockPos> triggered = triggeredMap.computeIfAbsent(reg.scheduleId(), k -> ConcurrentHashMap.newKeySet());
                 triggered.add(pos);
 
-                ScheduleEntry se = ScheduleManager.getInstance().get(reg.scheduleId());
+                ScheduleMemory se = ScheduleManager.getInstance().get(reg.scheduleId());
                 if (se != null && triggered.size() >= se.getConfig().getThreshold()) {
                     triggered.clear();
                     ScheduleManager.getInstance().onObserverTriggered(reg.scheduleId());

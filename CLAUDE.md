@@ -46,14 +46,24 @@ agent-mod/
 │   │   │   ├── CloseContainerAction.java # Close container (sync)
 │   │   │   └── SmeltAction.java      # Smelting recipe lookup (sync)
 │   │   ├── memory/
-│   │   │   ├── MemoryManager.java    # Global + per-agent scoped memory (CRUD, JSON persistence)
-│   │   │   ├── MemoryEntry.java      # Unified data model
-│   │   │   └── MemoryLocation.java   # Point/area location model
+│   │   │   ├── MemoryManager.java    # Global + per-agent scoped memory (CRUD, JSON persistence, @reference)
+│   │   │   ├── MemoryEntry.java      # Base data model (id, title, desc, content, category, visibleTo)
+│   │   │   ├── MemoryLocation.java   # Location interface (PointLocation, AreaLocation)
+│   │   │   ├── PointLocation.java    # Point location (x, y, z, radius)
+│   │   │   ├── AreaLocation.java     # Area location (x1, z1, x2, z2, y)
+│   │   │   ├── Locatable.java        # Interface for entries with location
+│   │   │   ├── StorageMemory.java    # Storage locations (PointLocation required)
+│   │   │   ├── FacilityMemory.java   # Facilities (MemoryLocation, point or area)
+│   │   │   ├── AreaMemory.java       # Named areas (AreaLocation required)
+│   │   │   ├── EventMemory.java      # Events (MemoryLocation optional)
+│   │   │   ├── SkillMemory.java      # Learned skills (no extra fields)
+│   │   │   ├── ScheduleMemory.java   # Schedules (ScheduleConfig as first-class field)
+│   │   │   ├── MemoryEntryTypeAdapter.java    # Gson polymorphic dispatch by category
+│   │   │   └── MemoryLocationTypeAdapter.java # Gson dispatch by type (point/area)
 │   │   ├── schedule/
-│   │   │   ├── ScheduleEntry.java    # MemoryEntry wrapper for schedule data
 │   │   │   ├── ScheduleConfig.java   # Trigger config (TIME_OF_DAY, INTERVAL, OBSERVER)
 │   │   │   ├── ObserverDef.java      # Individual observer definition
-│   │   │   ├── ScheduleManager.java  # Singleton: CRUD + tick evaluation + trigger routing
+│   │   │   ├── ScheduleManager.java  # Singleton: CRUD + tick eval + trigger routing (uses ScheduleMemory)
 │   │   │   ├── ObserverManager.java  # Forge event handler for OBSERVER triggers
 │   │   │   └── ManagerContext.java   # Manager runtime state (no FakePlayer)
 │   │   └── pathfinding/

@@ -25,26 +25,18 @@ public class BridgeClient {
     private static final Gson GSON = new Gson();
     private static final HttpClient HTTP = HttpClient.newHttpClient();
 
-    private static int cachedPort = -1;
-
     private static int getPort() {
-        if (cachedPort > 0) return cachedPort;
         try {
             Path portFile = FMLPaths.GAMEDIR.get().resolve(".agent/bridge-server.json");
             if (Files.exists(portFile)) {
                 String json = Files.readString(portFile, StandardCharsets.UTF_8);
                 JsonObject obj = JsonParser.parseString(json).getAsJsonObject();
-                cachedPort = obj.get("port").getAsInt();
-                return cachedPort;
+                return obj.get("port").getAsInt();
             }
         } catch (Exception e) {
             LOGGER.warn("Failed to read bridge port file", e);
         }
         return -1;
-    }
-
-    public static void resetPort() {
-        cachedPort = -1;
     }
 
     public static CompletableFuture<JsonObject> get(String path) {

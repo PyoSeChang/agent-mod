@@ -1,6 +1,7 @@
 package com.pyosechang.agent.core.schedule;
 
 import com.google.gson.JsonObject;
+import com.google.gson.annotations.SerializedName;
 import net.minecraft.core.BlockPos;
 
 /**
@@ -9,6 +10,7 @@ import net.minecraft.core.BlockPos;
 public class ObserverDef {
 
     private int x, y, z;
+    @SerializedName(value = "event", alternate = {"eventType"})
     private String eventType;    // e.g. "crop_grow", "block_break"
     private String condition;    // e.g. "age=7", "type=zombie" (nullable)
 
