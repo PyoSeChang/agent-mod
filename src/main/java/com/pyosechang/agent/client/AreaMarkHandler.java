@@ -57,7 +57,7 @@ public class AreaMarkHandler {
                 corner1 = pos;
                 if (mc.player != null) {
                     mc.player.displayClientMessage(
-                        net.minecraft.network.chat.Component.literal("§a[Memory] Corner 1: " + pos.toShortString() + " — Right-click corner 2"),
+                        net.minecraft.network.chat.Component.literal("§a" + net.minecraft.client.resources.language.I18n.get("gui.agent.memory.corner1", pos.toShortString())),
                         true
                     );
                 }

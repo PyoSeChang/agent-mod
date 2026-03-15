@@ -9,6 +9,7 @@ import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.components.MultiLineEditBox;
 import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.client.resources.language.I18n;
 import net.minecraft.network.chat.Component;
 
 import java.util.ArrayList;
@@ -54,8 +55,12 @@ public class AgentManagementScreen extends Screen {
     // Layout computed values
     private int midX, midW, toolX, toolW, toolListY;
 
+    // Tooltip state (deferred rendering)
+    private String pendingTooltipTool = null;
+    private int pendingTooltipX, pendingTooltipY;
+
     public AgentManagementScreen() {
-        super(Component.literal("Agent Management"));
+        super(Component.translatable("gui.agent.management.title"));
     }
 
     @Override
@@ -71,8 +76,8 @@ public class AgentManagementScreen extends Screen {
         toolX = midX + midW + gap;
 
         // Agent list search box
-        searchBox = new EditBox(font, 4, 18, LEFT_W - 8, 14, Component.literal("Search"));
-        searchBox.setHint(Component.literal("Search..."));
+        searchBox = new EditBox(font, 4, 18, LEFT_W - 8, 14, Component.translatable("gui.agent.management.search"));
+        searchBox.setHint(Component.translatable("gui.agent.management.search_hint"));
         searchBox.setResponder(text -> filterAgents());
         addRenderableWidget(searchBox);
 
@@ -82,9 +87,9 @@ public class AgentManagementScreen extends Screen {
         int y = formTop;
 
         // Name field
-        nameBox = new EditBox(font, midX, y + 12, midW, 16, Component.literal("Name"));
+        nameBox = new EditBox(font, midX, y + 12, midW, 16, Component.translatable("gui.agent.management.name"));
         nameBox.setMaxLength(32);
-        nameBox.setHint(Component.literal("agent name"));
+        nameBox.setHint(Component.translatable("gui.agent.management.name_hint"));
         nameBox.setEditable(true);
         addRenderableWidget(nameBox);
         y += 40;
@@ -92,7 +97,7 @@ public class AgentManagementScreen extends Screen {
         // Role textarea
         int roleH = 100;
         roleBox = new MultiLineEditBox(font, midX, y + 12, midW, roleH,
-            Component.literal(""), Component.literal("Role"));
+            Component.literal(""), Component.translatable("gui.agent.management.role"));
         roleBox.setCharacterLimit(300);
         addRenderableWidget(roleBox);
         y += roleH + 22;
@@ -100,7 +105,7 @@ public class AgentManagementScreen extends Screen {
         // Personality textarea
         int persH = 120;
         personalityBox = new MultiLineEditBox(font, midX, y + 12, midW, persH,
-            Component.literal(""), Component.literal("Personality"));
+            Component.literal(""), Component.translatable("gui.agent.management.personality"));
         personalityBox.setCharacterLimit(500);
         addRenderableWidget(personalityBox);
 
@@ -111,25 +116,25 @@ public class AgentManagementScreen extends Screen {
         int totalBtnW = btnW * 5 + btnGap * 4;
         int bx = width / 2 - totalBtnW / 2;
 
-        createBtn = addRenderableWidget(Button.builder(Component.literal("Create"), btn -> {
+        createBtn = addRenderableWidget(Button.builder(Component.translatable("gui.agent.management.create"), btn -> {
             if (createMode) doCreate();
             else enterCreateMode();
         }).bounds(bx, btnY, btnW, 20).build());
         bx += btnW + btnGap;
 
-        deleteBtn = addRenderableWidget(Button.builder(Component.literal("Delete"), btn -> doDelete())
+        deleteBtn = addRenderableWidget(Button.builder(Component.translatable("gui.agent.management.delete"), btn -> doDelete())
             .bounds(bx, btnY, btnW, 20).build());
         bx += btnW + btnGap;
 
-        spawnBtn = addRenderableWidget(Button.builder(Component.literal("Spawn"), btn -> doSpawn())
+        spawnBtn = addRenderableWidget(Button.builder(Component.translatable("gui.agent.management.spawn"), btn -> doSpawn())
             .bounds(bx, btnY, btnW, 20).build());
         bx += btnW + btnGap;
 
-        despawnBtn = addRenderableWidget(Button.builder(Component.literal("Despawn"), btn -> doDespawn())
+        despawnBtn = addRenderableWidget(Button.builder(Component.translatable("gui.agent.management.despawn"), btn -> doDespawn())
             .bounds(bx, btnY, btnW, 20).build());
         bx += btnW + btnGap;
 
-        saveBtn = addRenderableWidget(Button.builder(Component.literal("Save"), btn -> doSave())
+        saveBtn = addRenderableWidget(Button.builder(Component.translatable("gui.agent.management.save"), btn -> doSave())
             .bounds(bx, btnY, btnW, 20).build());
 
         updateVisibility();
@@ -180,7 +185,7 @@ public class AgentManagementScreen extends Screen {
         spawnBtn.active = hasAgent && !selectedSpawned;
         despawnBtn.active = hasAgent && selectedSpawned;
         saveBtn.active = hasAgent;
-        createBtn.setMessage(Component.literal(createMode ? "Confirm" : "Create"));
+        createBtn.setMessage(Component.translatable(createMode ? "gui.agent.management.confirm" : "gui.agent.management.create"));
     }
 
     private void refreshAgentList() {
@@ -281,8 +286,8 @@ public class AgentManagementScreen extends Screen {
         if (name.isEmpty()) return;
 
         JsonObject body = new JsonObject();
-        body.addProperty("role", roleBox.getValue().isEmpty() ? "General-purpose agent" : roleBox.getValue());
-        body.addProperty("personality", personalityBox.getValue().isEmpty() ? "Helpful and efficient." : personalityBox.getValue());
+        body.addProperty("role", roleBox.getValue().isEmpty() ? I18n.get("gui.agent.management.default_role") : roleBox.getValue());
+        body.addProperty("personality", personalityBox.getValue().isEmpty() ? I18n.get("gui.agent.management.default_personality") : personalityBox.getValue());
         JsonArray tools = new JsonArray();
         if (selectedTools.size() < availableTools.size()) {
             for (String t : selectedTools) tools.add(t);
@@ -394,7 +399,7 @@ public class AgentManagementScreen extends Screen {
 
         // === Left panel: agent list (full height) ===
         g.fill(0, 14, leftEnd, height, 0x80000000);
-        g.drawString(font, "Agents (" + filteredAgents.size() + ")", 6, 4, 0xCCCCCC);
+        g.drawString(font, I18n.get("gui.agent.management.agents_count", filteredAgents.size()), 6, 4, 0xCCCCCC);
         g.fill(4, LIST_TOP - 2, leftEnd - 4, LIST_TOP - 1, 0x30FFFFFF);
 
         int listBottom = height - 30;
@@ -403,7 +408,7 @@ public class AgentManagementScreen extends Screen {
         listScroll = Math.min(listScroll, maxScroll);
 
         if (filteredAgents.isEmpty()) {
-            g.drawString(font, "No agents", 8, LIST_TOP + 4, 0x606060);
+            g.drawString(font, I18n.get("gui.agent.management.no_agents"), 8, LIST_TOP + 4, 0x606060);
         }
 
         for (int i = 0; i < visibleEntries && i + listScroll < filteredAgents.size(); i++) {
@@ -448,26 +453,27 @@ public class AgentManagementScreen extends Screen {
             int y = formTop;
 
             // Name label + status badge
-            g.drawString(font, "Name", midX, y, 0x999999);
+            g.drawString(font, I18n.get("gui.agent.management.name"), midX, y, 0x999999);
             if (!createMode) {
-                String status = selectedSpawned ? "SPAWNED" : "OFFLINE";
+                String status = I18n.get(selectedSpawned ? "gui.agent.management.spawned" : "gui.agent.management.offline");
                 int sc = selectedSpawned ? 0xFF55FF55 : 0xFF666666;
                 g.drawString(font, status, midX + midW - font.width(status), y, sc);
             }
             y += 40;
 
             // Role label
-            g.drawString(font, "Role", midX, y, 0x999999);
+            g.drawString(font, I18n.get("gui.agent.management.role"), midX, y, 0x999999);
             y += 100 + 22;
 
             // Personality label
-            g.drawString(font, "Personality", midX, y, 0x999999);
+            g.drawString(font, I18n.get("gui.agent.management.personality"), midX, y, 0x999999);
 
             // === Right column: Tools ===
             int ty = formTop;
-            String toolLabel = availableTools.isEmpty() ? "Tools"
+            String toolLabel = availableTools.isEmpty() ? I18n.get("gui.agent.management.tools")
                 : selectedTools.size() >= availableTools.size()
-                    ? "Tools (all)" : "Tools (" + selectedTools.size() + "/" + availableTools.size() + ")";
+                    ? I18n.get("gui.agent.management.tools_all")
+                    : I18n.get("gui.agent.management.tools_count", selectedTools.size(), availableTools.size());
             g.drawString(font, toolLabel, toolX, ty, 0xFFAA00);
             ty += 14;
 
@@ -478,8 +484,11 @@ public class AgentManagementScreen extends Screen {
             toolScroll = Math.min(toolScroll, toolMax);
 
             if (availableTools.isEmpty()) {
-                g.drawString(font, "(no tools)", toolX + 4, ty, 0x606060);
+                g.drawString(font, I18n.get("gui.agent.management.no_tools"), toolX + 4, ty, 0x606060);
             } else {
+                String hoveredTool = null;
+                int hoveredToolY = 0;
+
                 for (int i = 0; i < toolVis && i + toolScroll < availableTools.size(); i++) {
                     String tool = availableTools.get(i + toolScroll);
                     boolean checked = selectedTools.contains(tool);
@@ -493,11 +502,17 @@ public class AgentManagementScreen extends Screen {
                     g.fill(toolX + 9, cy, toolX + 10, cy + 10, 0xFF555555);
                     if (checked) g.fill(toolX + 2, cy + 2, toolX + 8, cy + 8, 0xFF55FF55);
 
-                    g.drawString(font, tool, toolX + 14, cy + 1, checked ? 0xFFFFFF : 0x888888);
+                    // Display translated name, fallback to raw tool name
+                    String toolKey = "tool.agent." + tool;
+                    String displayName = I18n.exists(toolKey) ? I18n.get(toolKey) : tool;
+                    g.drawString(font, displayName, toolX + 14, cy + 1, checked ? 0xFFFFFF : 0x888888);
 
-                    int re = Math.min(toolX + 14 + font.width(tool) + 4, width - 6);
-                    if (mouseX >= toolX && mouseX < re && mouseY >= cy && mouseY < cy + 12)
+                    int re = Math.min(toolX + 14 + font.width(displayName) + 4, width - 6);
+                    if (mouseX >= toolX && mouseX < re && mouseY >= cy && mouseY < cy + 12) {
                         g.fill(toolX - 1, cy - 1, re, cy + 11, 0x14FFFFFF);
+                        hoveredTool = tool;
+                        hoveredToolY = cy;
+                    }
                 }
 
                 if (availableTools.size() > toolVis) {
@@ -505,13 +520,35 @@ public class AgentManagementScreen extends Screen {
                     int barY2 = ty + (toolScroll * (toolsBottom2 - ty - barH)) / Math.max(1, toolMax);
                     g.fill(width - 4, barY2, width - 2, barY2 + barH, 0x60FFFFFF);
                 }
+
+                // Deferred tooltip rendering (after super.render)
+                pendingTooltipTool = hoveredTool;
+                pendingTooltipX = mouseX;
+                pendingTooltipY = mouseY;
             }
         } else {
             int cx = (midX + width) / 2;
-            g.drawCenteredString(font, "Select an agent or click Create", cx, height / 2, 0x808080);
+            g.drawCenteredString(font, I18n.get("gui.agent.management.select_or_create"), cx, height / 2, 0x808080);
         }
 
         super.render(g, mouseX, mouseY, partialTick);
+
+        // Render tool tooltip on top of everything
+        if (pendingTooltipTool != null) {
+            String descKey = "tool.agent." + pendingTooltipTool + ".desc";
+            String nameKey = "tool.agent." + pendingTooltipTool;
+            List<Component> lines = new ArrayList<>();
+            lines.add(Component.literal(I18n.exists(nameKey) ? I18n.get(nameKey) : pendingTooltipTool)
+                .withStyle(s -> s.withColor(0xFFAA00)));
+            if (I18n.exists(descKey)) {
+                lines.add(Component.literal(I18n.get(descKey))
+                    .withStyle(s -> s.withColor(0xAAAAAA)));
+            }
+            lines.add(Component.literal(pendingTooltipTool)
+                .withStyle(s -> s.withColor(0x666666).withItalic(true)));
+            g.renderTooltip(font, lines, java.util.Optional.empty(), pendingTooltipX, pendingTooltipY);
+            pendingTooltipTool = null;
+        }
     }
 
     @Override

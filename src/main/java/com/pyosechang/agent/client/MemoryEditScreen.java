@@ -11,6 +11,7 @@ import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.components.MultiLineEditBox;
 import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.client.resources.language.I18n;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
 
@@ -32,6 +33,10 @@ import java.util.regex.Pattern;
  */
 public class MemoryEditScreen extends Screen {
     private static final String[] CATEGORIES = {"storage", "facility", "area", "event", "skill"};
+    private static final String[] CATEGORY_KEYS = {
+        "gui.agent.category.storage", "gui.agent.category.facility",
+        "gui.agent.category.area", "gui.agent.category.event", "gui.agent.category.skill"
+    };
     private static final int[] CATEGORY_COLORS = {0x55FF55, 0xFFAA00, 0x55FFFF, 0xFFFF55, 0x5555FF};
 
     // @[Title] in display ↔ @memory:mXXX in storage
@@ -84,7 +89,7 @@ public class MemoryEditScreen extends Screen {
     private int agentBtnY;
 
     public MemoryEditScreen(JsonObject existingEntry, MemoryListScreen parent) {
-        super(Component.literal(existingEntry != null ? "Edit Memory" : "New Memory"));
+        super(Component.translatable(existingEntry != null ? "gui.agent.memory.edit_title" : "gui.agent.memory.new_title"));
         this.existingEntry = existingEntry;
         this.parent = parent;
     }
@@ -119,7 +124,7 @@ public class MemoryEditScreen extends Screen {
 
         int descH = 80;
         descBox = new MultiLineEditBox(font, leftX, y + 12, leftW, descH,
-            Component.literal(""), Component.literal("Desc"));
+            Component.literal(""), Component.translatable("gui.agent.memory.field.desc_placeholder"));
         descBox.setCharacterLimit(300);
         addRenderableWidget(descBox);
         y += descH + 20;
@@ -127,13 +132,13 @@ public class MemoryEditScreen extends Screen {
         contentBoxY = y + 12;
         int contentH = Math.max(60, btnY - y - 36);
         contentBox = new MultiLineEditBox(font, leftX, contentBoxY, leftW, contentH,
-            Component.literal(""), Component.literal("Content"));
+            Component.literal(""), Component.translatable("gui.agent.memory.field.content_placeholder"));
         contentBox.setCharacterLimit(500);
         addRenderableWidget(contentBox);
 
         // Mention search box (hidden, only shown when picker is open)
         mentionSearchBox = new EditBox(font, leftX, contentBoxY - 20, leftW, 16, Component.empty());
-        mentionSearchBox.setHint(Component.literal("Search memories..."));
+        mentionSearchBox.setHint(Component.translatable("gui.agent.memory.search_hint"));
         mentionSearchBox.setMaxLength(100);
         mentionSearchBox.visible = false;
         mentionSearchBox.setResponder(text -> {
@@ -146,10 +151,10 @@ public class MemoryEditScreen extends Screen {
         // === Right column ===
         y = 24;
 
-        categoryDropdown = new DropdownWidget(font, rightX, y + 12, rightW, 16, Component.literal("Category"));
+        categoryDropdown = new DropdownWidget(font, rightX, y + 12, rightW, 16, Component.translatable("gui.agent.memory.category"));
         for (int i = 0; i < CATEGORIES.length; i++) {
             String cat = CATEGORIES[i];
-            String label = cat.substring(0, 1).toUpperCase() + cat.substring(1);
+            String label = I18n.get(CATEGORY_KEYS[i]);
             categoryDropdown.addEntry(cat, label, CATEGORY_COLORS[i]);
         }
         categoryDropdown.setSelectedByKey(selectedCategory);
@@ -162,7 +167,7 @@ public class MemoryEditScreen extends Screen {
 
         agentBtnY = y + 12;
         visibilityBtn = addRenderableWidget(Button.builder(
-            Component.literal(globalScope ? "Global (all agents)" : "Specific agents"),
+            Component.translatable(globalScope ? "gui.agent.memory.global" : "gui.agent.memory.specific"),
             btn -> {
                 if (globalScope) {
                     globalScope = false;
@@ -170,17 +175,17 @@ public class MemoryEditScreen extends Screen {
                 } else {
                     agentOverlayOpen = !agentOverlayOpen;
                 }
-                btn.setMessage(Component.literal(globalScope ? "Global (all agents)" : "Specific agents"));
+                btn.setMessage(Component.translatable(globalScope ? "gui.agent.memory.global" : "gui.agent.memory.specific"));
             }
         ).bounds(rightX, agentBtnY, rightW, 16).build());
         y += 50;
 
         // Location type cycle button
         locationCycleBtn = addRenderableWidget(Button.builder(
-            Component.literal(locationType.substring(0, 1).toUpperCase() + locationType.substring(1)),
+            Component.translatable("gui.agent.memory.location." + locationType),
             btn -> {
                 locationType = "point".equals(locationType) ? "area" : "point";
-                btn.setMessage(Component.literal(locationType.substring(0, 1).toUpperCase() + locationType.substring(1)));
+                btn.setMessage(Component.translatable("gui.agent.memory.location." + locationType));
                 updateLocationVisibility();
             }
         ).bounds(rightX, y + GuiLayout.LABEL_GAP, rightW, 16).build());
@@ -206,7 +211,7 @@ public class MemoryEditScreen extends Screen {
         // Utility buttons — after 2 rows of coords
         int utilY = y + GuiLayout.ROW_H * 2 + 4;
         int utilBtnW = (rightW - 4) / 2;
-        currentPosBtn = addRenderableWidget(Button.builder(Component.literal("Current Pos"), btn -> {
+        currentPosBtn = addRenderableWidget(Button.builder(Component.translatable("gui.agent.memory.current_pos"), btn -> {
             if (minecraft.player != null) {
                 BlockPos pos = minecraft.player.blockPosition();
                 if ("area".equals(locationType)) {
@@ -220,7 +225,7 @@ public class MemoryEditScreen extends Screen {
                 }
             }
         }).bounds(rightX, utilY, utilBtnW, 16).build());
-        markAreaBtn = addRenderableWidget(Button.builder(Component.literal("Mark Area"), btn -> {
+        markAreaBtn = addRenderableWidget(Button.builder(Component.translatable("gui.agent.memory.mark_area"), btn -> {
             AreaMarkHandler.start((c1, c2) -> {
                 minecraft.setScreen(new MemoryEditScreen(existingEntry, parent, "area", c1, c2));
             });
@@ -231,23 +236,22 @@ public class MemoryEditScreen extends Screen {
         int btnCount = existingEntry != null ? 3 : 2;
         int totalBtnW = btnCount * btnW + (btnCount - 1) * 6;
         int ax = width / 2 - totalBtnW / 2;
-        addRenderableWidget(Button.builder(Component.literal("Save"), btn -> save())
+        addRenderableWidget(Button.builder(Component.translatable("gui.agent.memory.save"), btn -> save())
             .bounds(ax, btnY, btnW, 20).build());
         ax += btnW + 6;
         if (existingEntry != null) {
-            addRenderableWidget(Button.builder(Component.literal("Delete"), btn -> delete())
+            addRenderableWidget(Button.builder(Component.translatable("gui.agent.memory.delete"), btn -> delete())
                 .bounds(ax, btnY, btnW, 20).build());
             ax += btnW + 6;
         }
-        addRenderableWidget(Button.builder(Component.literal("Cancel"), btn -> {
+        addRenderableWidget(Button.builder(Component.translatable("gui.agent.memory.cancel"), btn -> {
             minecraft.setScreen(parent);
         }).bounds(ax, btnY, btnW, 20).build());
 
         // Populate
         if (existingEntry != null) populateFromEntry();
         // Sync cycle button text after populate
-        locationCycleBtn.setMessage(Component.literal(
-            locationType.substring(0, 1).toUpperCase() + locationType.substring(1)));
+        locationCycleBtn.setMessage(Component.translatable("gui.agent.memory.location." + locationType));
 
         if (parent != null && existingEntry == null) {
             String ps = parent.getSelectedScope();
@@ -327,7 +331,7 @@ public class MemoryEditScreen extends Screen {
             }
         }
         if (visibilityBtn != null) {
-            visibilityBtn.setMessage(Component.literal(globalScope ? "Global (all agents)" : "Specific agents"));
+            visibilityBtn.setMessage(Component.translatable(globalScope ? "gui.agent.memory.global" : "gui.agent.memory.specific"));
         }
     }
 
@@ -548,17 +552,17 @@ public class MemoryEditScreen extends Screen {
 
         // === Left column labels ===
         int y = 24;
-        g.drawString(font, "Title", leftX, y, 0x999999);
+        g.drawString(font, I18n.get("gui.agent.memory.field.title"), leftX, y, 0x999999);
         y += 36;
-        g.drawString(font, "Description", leftX, y, 0x999999);
+        g.drawString(font, I18n.get("gui.agent.memory.field.description"), leftX, y, 0x999999);
         y += 80 + 20;
-        g.drawString(font, "Content  (@ to ref)", leftX, y, 0x999999);
+        g.drawString(font, I18n.get("gui.agent.memory.field.content"), leftX, y, 0x999999);
 
         // === Right column labels ===
         y = 24;
-        g.drawString(font, "Category", rightX, y, 0x999999);
+        g.drawString(font, I18n.get("gui.agent.memory.category"), rightX, y, 0x999999);
         y += 36;
-        g.drawString(font, "Visibility", rightX, y, 0x999999);
+        g.drawString(font, I18n.get("gui.agent.memory.visibility"), rightX, y, 0x999999);
 
         if (!globalScope && !selectedAgents.isEmpty()) {
             String names = String.join(", ", selectedAgents);
@@ -573,7 +577,7 @@ public class MemoryEditScreen extends Screen {
         y += 50;
 
         if (categoryHasLocation()) {
-            g.drawString(font, "Location", rightX, y, 0x999999);
+            g.drawString(font, I18n.get("gui.agent.memory.location"), rightX, y, 0x999999);
             y += GuiLayout.ROW_H; // after cycle button
             int smallW = (rightW - 8) / 3;
             if ("point".equals(locationType)) {
@@ -749,7 +753,7 @@ public class MemoryEditScreen extends Screen {
             agentOverlayOpen = false;
             if (selectedAgents.isEmpty()) {
                 globalScope = true;
-                visibilityBtn.setMessage(Component.literal("Global (all agents)"));
+                visibilityBtn.setMessage(Component.translatable("gui.agent.memory.global"));
             }
             return true;
         }
@@ -811,7 +815,7 @@ public class MemoryEditScreen extends Screen {
                     agentOverlayOpen = false;
                     if (selectedAgents.isEmpty()) {
                         globalScope = true;
-                        visibilityBtn.setMessage(Component.literal("Global (all agents)"));
+                        visibilityBtn.setMessage(Component.translatable("gui.agent.memory.global"));
                     }
                     return true;
                 }

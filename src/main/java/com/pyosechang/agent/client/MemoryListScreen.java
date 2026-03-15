@@ -9,6 +9,7 @@ import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.client.resources.language.I18n;
 import net.minecraft.network.chat.Component;
 
 import java.util.ArrayList;
@@ -20,6 +21,10 @@ import java.util.List;
  */
 public class MemoryListScreen extends Screen {
     private static final String[] CATEGORIES = {"all", "storage", "facility", "area", "event", "skill"};
+    private static final String[] CATEGORY_KEYS = {
+        "gui.agent.category.all", "gui.agent.category.storage", "gui.agent.category.facility",
+        "gui.agent.category.area", "gui.agent.category.event", "gui.agent.category.skill"
+    };
     private static final int[] CATEGORY_COLORS = {0xAAAAAA, 0x55FF55, 0xFFAA00, 0x55FFFF, 0xFFFF55, 0x5555FF};
     private static final int ENTRY_HEIGHT = 24;
     private static final int LIST_TOP = 38;
@@ -35,7 +40,7 @@ public class MemoryListScreen extends Screen {
     private DropdownWidget scopeDropdown;
 
     public MemoryListScreen() {
-        super(Component.literal("Agent Memory"));
+        super(Component.translatable("gui.agent.memory.title"));
     }
 
     String getSelectedScope() { return selectedScope; }
@@ -44,10 +49,10 @@ public class MemoryListScreen extends Screen {
     protected void init() {
         int centerX = width / 2;
 
-        categoryDropdown = new DropdownWidget(font, 8, 18, 80, 16, Component.literal("Category"));
+        categoryDropdown = new DropdownWidget(font, 8, 18, 80, 16, Component.translatable("gui.agent.memory.category"));
         for (int i = 0; i < CATEGORIES.length; i++) {
             String cat = CATEGORIES[i];
-            String label = cat.substring(0, 1).toUpperCase() + cat.substring(1);
+            String label = I18n.get(CATEGORY_KEYS[i]);
             categoryDropdown.addEntry(cat, label, CATEGORY_COLORS[i]);
         }
         categoryDropdown.setSelectedByKey(selectedCategory);
@@ -58,8 +63,8 @@ public class MemoryListScreen extends Screen {
         });
         addRenderableWidget(categoryDropdown);
 
-        scopeDropdown = new DropdownWidget(font, 92, 18, 80, 16, Component.literal("Scope"));
-        scopeDropdown.addEntry("all", "All", 0xFFFFFF);
+        scopeDropdown = new DropdownWidget(font, 92, 18, 80, 16, Component.translatable("gui.agent.memory.scope"));
+        scopeDropdown.addEntry("all", I18n.get("gui.agent.memory.scope_all"), 0xFFFFFF);
         scopeDropdown.setSelectedByKey(selectedScope);
         scopeDropdown.setOnSelect(entry -> {
             selectedScope = entry.key();
@@ -68,12 +73,12 @@ public class MemoryListScreen extends Screen {
         });
         addRenderableWidget(scopeDropdown);
 
-        searchBox = new EditBox(font, 176, 18, width - 184, 16, Component.literal("Search"));
-        searchBox.setHint(Component.literal("Search memories..."));
+        searchBox = new EditBox(font, 176, 18, width - 184, 16, Component.translatable("gui.agent.memory.search"));
+        searchBox.setHint(Component.translatable("gui.agent.memory.search_hint"));
         searchBox.setResponder(text -> refreshList());
         addRenderableWidget(searchBox);
 
-        addRenderableWidget(Button.builder(Component.literal("+ New Memory"), btn -> {
+        addRenderableWidget(Button.builder(Component.translatable("gui.agent.memory.new"), btn -> {
             minecraft.setScreen(new MemoryEditScreen(null, this));
         }).bounds(centerX - 55, height - 24, 110, 20).build());
 
@@ -88,7 +93,7 @@ public class MemoryListScreen extends Screen {
             if (java.nio.file.Files.isDirectory(agentsDir)) {
                 String currentKey = scopeDropdown.getSelectedKey();
                 scopeDropdown.clearEntries();
-                scopeDropdown.addEntry("all", "All", 0xFFFFFF);
+                scopeDropdown.addEntry("all", I18n.get("gui.agent.memory.scope_all"), 0xFFFFFF);
                 try (var dirs = java.nio.file.Files.list(agentsDir)) {
                     dirs.filter(java.nio.file.Files::isDirectory).forEach(dir -> {
                         String name = dir.getFileName().toString();
@@ -139,7 +144,7 @@ public class MemoryListScreen extends Screen {
         scrollOffset = Math.min(scrollOffset, maxScroll);
 
         if (displayedEntries.isEmpty()) {
-            g.drawCenteredString(font, "No memories found", width / 2, LIST_TOP + 20, 0x808080);
+            g.drawCenteredString(font, I18n.get("gui.agent.memory.no_results"), width / 2, LIST_TOP + 20, 0x808080);
         }
 
         for (int i = 0; i < visibleEntries && i + scrollOffset < displayedEntries.size(); i++) {
@@ -189,7 +194,7 @@ public class MemoryListScreen extends Screen {
             g.fill(width - 4, barY, width - 2, barY + barH, 0x60FFFFFF);
         }
 
-        g.drawString(font, displayedEntries.size() + " entries", 4, height - 10, 0x808080);
+        g.drawString(font, I18n.get("gui.agent.memory.entries", displayedEntries.size()), 4, height - 10, 0x808080);
 
         super.render(g, mouseX, mouseY, partialTick);
 

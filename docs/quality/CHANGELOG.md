@@ -1,5 +1,34 @@
 # CHANGELOG
 
+## v0.5.2 — 2026-03-15 `[multi-agent, infra]`
+
+클라이언트 GUI 다국어(i18n) 지원. 한국어(ko_kr), 영어(en_us) lang 파일 추가. MCP 도구 목록에 사람이 읽기 좋은 번역 이름 + 호버 설명 툴팁 추가.
+
+### 변경 사항
+
+**`multi-agent`**
+- `AgentManagementScreen.java`: 모든 하드코딩 문자열을 `Component.translatable()` / `I18n.get()`으로 전환
+  - MCP 도구 이름: `mine_area` → "Mine Area" (en) / "영역 채굴" (kr), lang 키 없으면 원본 이름 fallback
+  - 도구 호버 시 3줄 툴팁: 번역 이름(주황) + 설명(회색) + 원본 키(이탤릭)
+- `MemoryListScreen.java`: 화면 타이틀, 카테고리/스코프 드롭다운, 검색, 버튼 텍스트 i18n 적용
+- `MemoryEditScreen.java`: 필드 라벨, 버튼, visibility 토글, location 타입 텍스트 i18n 적용
+- `AreaMarkHandler.java`: 코너 선택 채팅 메시지 i18n 적용
+
+**`infra`**
+- `assets/agent/lang/en_us.json` 신규: 영어 번역 파일 (GUI 65+ 키 + 도구 22쌍)
+- `assets/agent/lang/ko_kr.json` 신규: 한국어 번역 파일
+
+### 번역 키 구조
+
+```
+key.agent.*                → 키바인딩 이름
+gui.agent.management.*     → 에이전트 관리 화면
+gui.agent.memory.*         → 메모리 브라우저/편집 화면
+gui.agent.category.*       → 공유 카테고리 라벨
+tool.agent.<name>          → MCP 도구 표시 이름
+tool.agent.<name>.desc     → MCP 도구 설명 (호버 툴팁)
+```
+
 ## v0.4.1 — 2026-03-14 `[body, actions]`
 
 PathFollower를 setPos 방식에서 deltaMovement 방식으로 전환 (바닐라 MoveControl 패턴). aiStep/travel과 협력하여 물리 기반 이동. MineBlockAction에 채굴 후 아이템 회수 이동 추가.
