@@ -7,6 +7,7 @@ import java.io.IOException;
 import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 public class SSESubscriber implements EventSubscriber {
     private static final SSESubscriber INSTANCE = new SSESubscriber();
@@ -15,7 +16,7 @@ public class SSESubscriber implements EventSubscriber {
     private static final long HEARTBEAT_INTERVAL_MS = 15_000;
 
     private final CopyOnWriteArrayList<OutputStream> connections = new CopyOnWriteArrayList<>();
-    private volatile boolean heartbeatRunning = false;
+    private final AtomicBoolean heartbeatRunning = new AtomicBoolean(false);
 
     private SSESubscriber() {}
 
@@ -46,29 +47,26 @@ public class SSESubscriber implements EventSubscriber {
     }
 
     private void ensureHeartbeat() {
-        if (heartbeatRunning) return;
-        heartbeatRunning = true;
+        if (!heartbeatRunning.compareAndSet(false, true)) return;
         Thread heartbeat = new Thread(() -> {
-            while (heartbeatRunning) {
-                try {
+            try {
+                while (!connections.isEmpty()) {
                     Thread.sleep(HEARTBEAT_INTERVAL_MS);
-                } catch (InterruptedException e) {
-                    break;
-                }
-                for (OutputStream out : connections) {
-                    try {
-                        synchronized (out) {
-                            out.write(HEARTBEAT);
-                            out.flush();
+                    for (OutputStream out : connections) {
+                        try {
+                            synchronized (out) {
+                                out.write(HEARTBEAT);
+                                out.flush();
+                            }
+                        } catch (IOException e) {
+                            connections.remove(out);
                         }
-                    } catch (IOException e) {
-                        connections.remove(out);
                     }
                 }
-                if (connections.isEmpty()) {
-                    heartbeatRunning = false;
-                    break;
-                }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            } finally {
+                heartbeatRunning.set(false);
             }
         }, "sse-heartbeat");
         heartbeat.setDaemon(true);

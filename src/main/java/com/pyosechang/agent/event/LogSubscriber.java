@@ -13,6 +13,9 @@ public class LogSubscriber implements EventSubscriber {
     @Override
     public void onEvent(AgentEvent event) {
         if (!HANDLED.contains(event.type())) return;
-        AgentLogger.getInstance().logEvent(event.type().name(), event.toJson());
+        AgentLogger logger = AgentLogger.getInstance();
+        if (logger != null) {
+            logger.logEvent(event.type().name(), event.toJson());
+        }
     }
 }

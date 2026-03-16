@@ -1,11 +1,15 @@
 package com.pyosechang.agent.event;
 
+import com.mojang.logging.LogUtils;
+import org.slf4j.Logger;
+
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.ConcurrentLinkedDeque;
 import java.util.concurrent.CopyOnWriteArrayList;
 
 public class EventBus {
+    private static final Logger LOGGER = LogUtils.getLogger();
     private static final EventBus INSTANCE = new EventBus();
     private static final int MAX_HISTORY = 2000;
 
@@ -27,7 +31,7 @@ public class EventBus {
             try {
                 sub.onEvent(event);
             } catch (Exception e) {
-                // Don't let one subscriber's failure break others
+                LOGGER.warn("EventBus subscriber failed: {}", e.getMessage());
             }
         }
     }

@@ -1,17 +1,17 @@
 # Codebase Survey — agent-mod
 
 > 전수 조사 일자: 2026-03-15
-> 조사 범위: Java 74개 + TypeScript 7개 소스 + 6개 테스트
+> 조사 범위: Java 81개 + TypeScript 7개 소스 + 6개 테스트 + Go 8개
 > 기준: Forge 1.20.1, Java 17, Node.js + Claude Agent SDK
 
 ## 요약 통계
 
-- Total files analyzed: 87 (74 Java + 7 TS source + 6 TS test)
-- Critical issues: 7
-- High issues: 6
-- Medium issues: 7
-- Unit testable: 25 files
-- Integration testable: 12 files
+- Total files analyzed: 102 (81 Java + 7 TS source + 6 TS test + 8 Go)
+- Critical issues: 8
+- High issues: 9
+- Medium issues: 11
+- Unit testable: 29 files
+- Integration testable: 13 files
 - In-game only: 50 files
 
 ---
@@ -1043,6 +1043,101 @@
 - **테스트 가능성**: N/A (테스트 파일)
 - **테스트 가능한 로직**: N/A
 - **발견된 이슈**: 없음 (의도적으로 최소한)
+
+---
+
+## 15. event/ (7 files)
+
+### EventType.java
+- **역할**: 이벤트 타입 enum — THOUGHT, TOOL_CALL, TOOL_RESULT, TEXT, ERROR, CHAT (런타임); SPAWNED, DESPAWNED, RUNTIME_STARTED, RUNTIME_STOPPED, PAUSED, RESUMED (라이프사이클); SCHEDULE_TRIGGERED, OBSERVER_FIRED (스케줄); ACTION_STARTED, ACTION_COMPLETED, ACTION_FAILED (액션)
+- **의존성**: 없음
+- **테스트 가능성**: Unit — 단순 enum
+- **발견된 이슈**: 없음
+
+### EventBus.java
+- **역할**: 싱글톤 pub/sub 이벤트 버스 — CopyOnWriteArrayList 구독자, ConcurrentLinkedDeque 링 버퍼 (max 2000)
+- **의존성**: AgentEvent, EventSubscriber
+- **핵심 로직**: publish() → 모든 구독자에 전달 + history 추가, subscribe/unsubscribe, getHistory()
+- **테스트 가능성**: Unit — Minecraft 의존성 없음
+- **발견된 이슈**:
+  - publish()에서 구독자 예외 silent catch (로깅 없음) — HIGH → v0.6.1에서 수정됨
+  - ring buffer trim이 concurrent publish에서 경합 가능 (over-trim) — MEDIUM
+
+### AgentEvent.java
+- **역할**: 이벤트 레코드 (timestamp, agentName, EventType, JsonObject data) + SSE/JSON 직렬화
+- **의존성**: Gson
+- **핵심 로직**: of() 팩토리, toJson(), toSSE() (wire format: "event: TYPE\ndata: {json}\n\n")
+- **테스트 가능성**: Unit — 순수 데이터 + 직렬화
+- **발견된 이슈**: 없음
+
+### EventSubscriber.java
+- **역할**: 함수형 인터페이스 — void onEvent(AgentEvent)
+- **테스트 가능성**: N/A (인터페이스)
+- **발견된 이슈**: 없음
+
+### ChatSubscriber.java
+- **역할**: EventBus → Minecraft 인게임 채팅 브로드캐스트 (CHAT, TEXT, ERROR, SPAWNED, DESPAWNED 필터링)
+- **의존성**: [Minecraft 필수] MinecraftServer, ServerPlayer, Component
+- **핵심 로직**: 이벤트 타입별 색상 포맷팅, 멀티라인 분할, manager 보라색 구분
+- **테스트 가능성**: Integration — MinecraftServer 필요
+- **발견된 이슈**: regex `"\\\\n|\n"` 의도 확인 필요 — LOW
+
+### SSESubscriber.java
+- **역할**: EventBus → SSE 스트림 관리 — CopyOnWriteArrayList<OutputStream>, heartbeat 스레드 (15초)
+- **의존성**: 없음 (순수 I/O)
+- **핵심 로직**: addConnection/removeConnection, onEvent → SSE 바이트 쓰기, ensureHeartbeat
+- **테스트 가능성**: Unit — ByteArrayOutputStream으로 mock 가능
+- **발견된 이슈**:
+  - CRITICAL: heartbeatRunning boolean 경합 → AtomicBoolean 필요 — v0.6.1에서 수정됨
+  - broken connection 제거는 정상 동작
+
+### LogSubscriber.java
+- **역할**: EventBus → AgentLogger JSONL 기록 (ACTION_STARTED, ACTION_COMPLETED, ACTION_FAILED 필터링)
+- **의존성**: AgentLogger
+- **핵심 로직**: 이벤트 타입 필터 후 AgentLogger.logEvent() 위임
+- **테스트 가능성**: Integration — AgentLogger 싱글톤 필요
+- **발견된 이슈**: AgentLogger.getInstance() null 미체크 → NPE 가능 — HIGH → v0.6.1에서 수정됨
+
+---
+
+## 16. agent-tui/ — Go TUI (8 files)
+
+### main.go
+- **역할**: 엔트리포인트 — bridge-server.json 포트 탐지, Bubbletea 프로그램 실행, SSE 스트리밍 시작
+- **의존성**: charmbracelet/bubbletea, client.go
+- **발견된 이슈**: SSE goroutine이 program.Run() 전 시작 — MEDIUM (race 가능)
+
+### model.go (360줄)
+- **역할**: 메인 Bubbletea 모델 — ModeList/ModeInput 듀얼 모드, 에이전트 목록 + 세션 뷰포트, SSE 이벤트 핸들링
+- **핵심 로직**: Update() 메시지 라우팅, verbose 토글 (Ctrl+O), 에이전트 전환, rebuildConversation
+- **발견된 이슈**: type assertion `msg.(rawMessage)` fragile — MEDIUM
+
+### client.go (195줄)
+- **역할**: HTTP 클라이언트 — Tell(), Spawn(), Despawn(), Stop(), TellManager(), FetchSessionInfo(), FetchHistory(), StreamEvents()
+- **발견된 이슈**:
+  - SSE 재연결 로직 없음 — 연결 끊기면 영구 중단 — HIGH
+  - JSON decode 에러 무시 (3곳) — HIGH
+  - Spawn 좌표 하드코딩 (0, 64, 0) — MEDIUM
+
+### event.go (183줄)
+- **역할**: 이벤트 타입 + 스타일링 — FormatEvent() SSE 이벤트를 터미널 출력으로 변환 (Claude Code 미학)
+- **발견된 이슈**: json.Unmarshal 에러 무시 — LOW
+
+### agent_list.go (165줄)
+- **역할**: 좌측 패널 — 에이전트 목록, 상태 표시 (● running, ● spawned, ○ idle, · offline), 커서 네비게이션
+- **발견된 이슈**: 없음
+
+### session.go (201줄)
+- **역할**: 우측 패널 — 스크롤 대화 뷰포트 + 메시지 입력, /spawn /despawn /stop 커맨드
+- **발견된 이슈**: wrapText() no-op (styled text 래핑 미구현) — LOW
+
+### style.go (37줄)
+- **역할**: Lipgloss 스타일 상수 (border 색상, 상태 표시, 이벤트 색상)
+- **발견된 이슈**: ~12개 미사용 스타일 변수, 색상 중복 정의 — MEDIUM
+
+### go.mod
+- **역할**: Go 모듈 매니페스트
+- **의존성**: bubbletea v1.3.10, lipgloss v1.1.0, bubbles v1.0.0, Go 1.26.1
 
 ---
 

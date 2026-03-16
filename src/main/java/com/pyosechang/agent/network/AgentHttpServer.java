@@ -1244,11 +1244,21 @@ public class AgentHttpServer {
         OutputStream os = exchange.getResponseBody();
         SSESubscriber.getInstance().addConnection(os);
         try {
-            Thread.currentThread().join();
+            // Block until connection breaks (detected by failed write)
+            while (true) {
+                Thread.sleep(1000);
+                try {
+                    os.write(":\n\n".getBytes());  // SSE comment as keepalive probe
+                    os.flush();
+                } catch (IOException e) {
+                    break;  // Client disconnected
+                }
+            }
         } catch (InterruptedException e) {
-            // Client disconnected
+            Thread.currentThread().interrupt();
         } finally {
             SSESubscriber.getInstance().removeConnection(os);
+            exchange.close();
         }
     }
 

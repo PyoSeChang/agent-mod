@@ -566,6 +566,68 @@ Split into 4 sub-groups for maintainability:
 
 ---
 
+## E. EventBus Unit Tests (v0.6.0 추가)
+
+### E1. EventBusTest
+
+**Target**: `event/EventBus.java`
+**Prerequisites**: Singleton reset — reflection으로 `subscribers` (CopyOnWriteArrayList) + `history` (ConcurrentLinkedDeque) 초기화
+**Setup**: `@BeforeEach`에서 EventBus.getInstance() 필드 초기화
+
+| ID | Behavior | Input/Setup | Expected | Priority |
+|----|----------|-------------|----------|----------|
+| TC-234 | getInstance() returns singleton | Two calls | Same reference | P2 |
+| TC-235 | publish delivers to subscriber | Subscribe lambda, publish 1 event | Lambda receives event | P1 |
+| TC-236 | publish delivers to multiple subscribers | 2 subscribers, publish 1 event | Both receive event | P1 |
+| TC-237 | unsubscribe stops delivery | Subscribe, unsubscribe, publish | Lambda NOT called after unsubscribe | P1 |
+| TC-238 | subscriber exception does not break others | Sub1 throws, Sub2 normal; publish | Sub2 still receives event | P1 |
+| TC-239 | getHistory returns events in order | Publish 3 events | getHistory() returns [e1, e2, e3] | P1 |
+| TC-240 | getHistory returns defensive copy | getHistory(), modify returned list | Internal history unchanged | P2 |
+| TC-241 | ring buffer evicts oldest at MAX_HISTORY | Publish 2001 events | size=2000, first event is #2 | P1 |
+| TC-242 | publish with no subscribers | No subscribers, publish event | No exception | P2 |
+| TC-243 | getHistory empty initially | Fresh bus | Empty list | P3 |
+
+### E2. AgentEventTest
+
+**Target**: `event/AgentEvent.java`
+**Prerequisites**: None (Gson on classpath)
+
+| ID | Behavior | Input/Setup | Expected | Priority |
+|----|----------|-------------|----------|----------|
+| TC-244 | of() with data sets timestamp | of("alex", CHAT, jsonObj) | timestamp > 0, fields match | P1 |
+| TC-245 | of() with null data uses empty JsonObject | of("alex", SPAWNED, null) | data is empty JsonObject (not null) | P1 |
+| TC-246 | two-arg of() delegates correctly | of("alex", SPAWNED) | Same as of("alex", SPAWNED, null) | P2 |
+| TC-247 | toJson() has all 4 fields | Create event, toJson() | timestamp, agentName, type, data keys present | P1 |
+| TC-248 | toJson() type field is enum name | TOOL_CALL event | toJson().get("type") == "TOOL_CALL" | P1 |
+| TC-249 | toSSE() format correct | CHAT event | Starts with "event: CHAT\ndata: ", ends with "\n\n" | P1 |
+| TC-250 | toSSE() data is parseable JSON | Event, toSSE() | Parse data line as JSON succeeds, contains agentName | P1 |
+| TC-251 | record equality by value | Two events same fields | equals() true | P3 |
+
+### E3. SSESubscriberTest
+
+**Target**: `event/SSESubscriber.java`
+**Prerequisites**: Singleton reset — reflection으로 `connections` 초기화
+
+| ID | Behavior | Input/Setup | Expected | Priority |
+|----|----------|-------------|----------|----------|
+| TC-252 | getInstance() returns singleton | Two calls | Same reference | P3 |
+| TC-253 | onEvent writes SSE bytes to connection | addConnection(baos), onEvent | baos contains "event:" and "data:" | P1 |
+| TC-254 | onEvent writes to multiple connections | 2 ByteArrayOutputStreams | Both contain same SSE bytes | P1 |
+| TC-255 | broken connection removed on IOException | OutputStream throws on write | Connection removed from list | P1 |
+| TC-256 | removeConnection stops delivery | add, remove, onEvent | baos empty after onEvent | P2 |
+| TC-257 | addConnection starts heartbeat | addConnection(baos) | heartbeatRunning field is true | P2 |
+
+### E4. EventTypeTest
+
+**Target**: `event/EventType.java`
+
+| ID | Behavior | Input/Setup | Expected | Priority |
+|----|----------|-------------|----------|----------|
+| TC-258 | enum has expected count | EventType.values().length | 17 | P3 |
+| TC-259 | valueOf roundtrips all constants | For each, valueOf(name()) | Same constant | P4 |
+
+---
+
 ## Summary
 
 | Category | Count | P1 | P2 | P3 | P4 | P5 |
@@ -574,7 +636,8 @@ Split into 4 sub-groups for maintainability:
 | B. Java Integration Tests | 51 (TC-139 to TC-189) | 15 | 21 | 1 | 0 | 8 |
 | C. TypeScript Unit Tests | 34 (TC-190 to TC-223) | 5 | 22 | 5 | 0 | 0 |
 | D. TypeScript Integration Tests | 10 (TC-224 to TC-233) | 0 | 4 | 6 | 0 | 0 |
-| **TOTAL** | **233** | **53** | **97** | **44** | **5** | **8** |
+| E. EventBus Unit Tests | 26 (TC-234 to TC-259) | 10 | 10 | 4 | 2 | 0 |
+| **TOTAL** | **259** | **63** | **107** | **48** | **7** | **8** |
 
 > 원본 195개에서: +20 (신규 A15/A16/A17 + 확장 TC) - 5 (TC-115/116 삭제, TC-179 삭제) + 기타 번호 재배치 = ~210 실질 케이스. ID 공간은 233까지 사용 (번호 재배치로 인한 gap 최소화).
 
