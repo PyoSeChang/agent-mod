@@ -5,11 +5,12 @@ import com.google.gson.JsonParser;
 import com.mojang.logging.LogUtils;
 import com.pyosechang.agent.core.schedule.ManagerContext;
 import com.pyosechang.agent.core.schedule.ScheduleManager;
+import com.pyosechang.agent.event.AgentEvent;
+import com.pyosechang.agent.event.EventBus;
+import com.pyosechang.agent.event.EventType;
 import com.pyosechang.agent.network.AgentHttpServer;
-import net.minecraft.ChatFormatting;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.network.chat.Component;
-import net.minecraft.network.chat.MutableComponent;
 import net.minecraftforge.fml.loading.FMLPaths;
 import org.slf4j.Logger;
 
@@ -77,6 +78,7 @@ public class ManagerRuntimeManager {
                 Process process = pb.start();
                 ctx.setRuntimeProcess(process);
                 LOGGER.info("Manager runtime launched (PID {})", process.pid());
+                EventBus.getInstance().publish(AgentEvent.of("manager", EventType.RUNTIME_STARTED));
 
                 try (BufferedReader reader = new BufferedReader(
                         new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8))) {
@@ -89,6 +91,7 @@ public class ManagerRuntimeManager {
 
                 int exitCode = process.waitFor();
                 LOGGER.info("Manager runtime exited with code {}", exitCode);
+                EventBus.getInstance().publish(AgentEvent.of("manager", EventType.RUNTIME_STOPPED));
                 if (exitCode != 0 && source.getServer() != null) {
                     source.getServer().execute(() -> {
                         source.sendFailure(Component.literal(
@@ -124,46 +127,35 @@ public class ManagerRuntimeManager {
         try {
             JsonObject json = JsonParser.parseString(line).getAsJsonObject();
             String type = json.has("type") ? json.get("type").getAsString() : "";
-            String prefix = "[Manager] ";
 
             switch (type) {
                 case "thought" -> {
-                    String text = json.get("text").getAsString();
-                    String[] lines = text.split("\\\\n|\n");
-                    int maxLines = 20;
-                    int lineCount = Math.min(lines.length, maxLines);
-                    for (int i = 0; i < lineCount; i++) {
-                        String l = lines[i].trim();
-                        if (l.isEmpty()) continue;
-                        String p = (i == 0) ? prefix : "  ";
-                        sendChatLine(source, Component.literal(p + l).withStyle(ChatFormatting.LIGHT_PURPLE));
-                    }
+                    JsonObject data = new JsonObject();
+                    data.addProperty("text", json.get("text").getAsString());
+                    EventBus.getInstance().publish(AgentEvent.of("manager", EventType.THOUGHT, data));
                 }
                 case "tool_call" -> {
-                    String name = json.get("name").getAsString();
-                    name = name.replace("mcp__manager-bridge__", "");
-                    sendChatLine(source, Component.literal(prefix + "> " + name).withStyle(ChatFormatting.AQUA));
+                    JsonObject data = new JsonObject();
+                    data.addProperty("name", json.get("name").getAsString());
+                    EventBus.getInstance().publish(AgentEvent.of("manager", EventType.TOOL_CALL, data));
+                }
+                case "chat" -> {
+                    JsonObject data = new JsonObject();
+                    data.addProperty("text", json.get("text").getAsString());
+                    EventBus.getInstance().publish(AgentEvent.of("manager", EventType.CHAT, data));
                 }
                 case "result" -> {
-                    int turns = json.has("turns") ? json.get("turns").getAsInt() : 0;
-                    sendChatLine(source, Component.literal(String.format(prefix + "Done (%d turns)", turns))
-                        .withStyle(ChatFormatting.GREEN));
+                    JsonObject data = new JsonObject();
+                    if (json.has("turns")) data.addProperty("turns", json.get("turns").getAsInt());
+                    EventBus.getInstance().publish(AgentEvent.of("manager", EventType.TEXT, data));
                 }
                 case "error" -> {
-                    String err = json.has("message") ? json.get("message").getAsString() : "unknown";
-                    sendChatLine(source, Component.literal(prefix + "Error: " + err).withStyle(ChatFormatting.RED));
+                    JsonObject data = new JsonObject();
+                    data.addProperty("message", json.has("message") ? json.get("message").getAsString() : "unknown");
+                    EventBus.getInstance().publish(AgentEvent.of("manager", EventType.ERROR, data));
                 }
                 default -> {}
             };
         } catch (Exception ignored) {}
-    }
-
-    private void sendChatLine(CommandSourceStack source, MutableComponent msg) {
-        if (source.getServer() != null) {
-            final MutableComponent finalMsg = msg;
-            source.getServer().execute(() -> {
-                source.sendSuccess(() -> finalMsg, false);
-            });
-        }
     }
 }

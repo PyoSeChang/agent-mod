@@ -80,9 +80,12 @@ async function main() {
 
       if (msg.type === "assistant" && msg.message?.content) {
         for (const block of msg.message.content) {
-          if ("text" in block && block.text) {
-            await sendLog("thought", block.text);
-            console.log(JSON.stringify({ type: "thought", text: block.text }));
+          if ("thinking" in block && block.thinking) {
+            await sendLog("thought", block.thinking);
+            console.log(JSON.stringify({ type: "thought", text: block.thinking }));
+          } else if ("text" in block && block.text) {
+            await sendLog("chat", block.text);
+            console.log(JSON.stringify({ type: "chat", text: block.text }));
           }
           if ("name" in block && block.name) {
             await sendLog("action", `${block.name}(${JSON.stringify(block.input || {})})`);

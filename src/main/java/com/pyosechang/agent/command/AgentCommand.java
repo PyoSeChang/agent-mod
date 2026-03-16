@@ -6,6 +6,9 @@ import com.mojang.brigadier.suggestion.SuggestionProvider;
 import com.pyosechang.agent.AgentMod;
 import com.pyosechang.agent.core.AgentContext;
 import com.pyosechang.agent.core.AgentManager;
+import com.pyosechang.agent.event.AgentEvent;
+import com.pyosechang.agent.event.EventBus;
+import com.pyosechang.agent.event.EventType;
 import com.pyosechang.agent.runtime.RuntimeManager;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
@@ -204,6 +207,7 @@ public class AgentCommand {
             return 0;
         }
         agent.getInterventionQueue().add("[PAUSE] Player requested pause");
+        EventBus.getInstance().publish(AgentEvent.of(name, EventType.PAUSED));
         source.sendSuccess(() -> Component.literal("[" + name + "] Pause requested"), false);
         return 1;
     }
@@ -215,6 +219,7 @@ public class AgentCommand {
             return 0;
         }
         agent.getInterventionQueue().add("[RESUME] Player requested resume");
+        EventBus.getInstance().publish(AgentEvent.of(name, EventType.RESUMED));
         source.sendSuccess(() -> Component.literal("[" + name + "] Resume requested"), false);
         return 1;
     }

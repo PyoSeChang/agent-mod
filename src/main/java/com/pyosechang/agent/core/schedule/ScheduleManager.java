@@ -7,6 +7,9 @@ import com.pyosechang.agent.core.AgentManager;
 import com.pyosechang.agent.core.memory.MemoryEntry;
 import com.pyosechang.agent.core.memory.MemoryManager;
 import com.pyosechang.agent.core.memory.ScheduleMemory;
+import com.pyosechang.agent.event.AgentEvent;
+import com.pyosechang.agent.event.EventBus;
+import com.pyosechang.agent.event.EventType;
 import com.pyosechang.agent.runtime.RuntimeManager;
 import org.slf4j.Logger;
 
@@ -219,6 +222,12 @@ public class ScheduleManager {
         String message = sm.getContent(); // prompt from content field
 
         LOGGER.info("Schedule '{}' triggered -> {} : {}", sm.getId(), targetAgent, message);
+
+        JsonObject triggerData = new JsonObject();
+        triggerData.addProperty("scheduleId", sm.getId());
+        triggerData.addProperty("title", sm.getTitle());
+        triggerData.addProperty("targetAgent", targetAgent);
+        EventBus.getInstance().publish(AgentEvent.of(targetAgent, EventType.SCHEDULE_TRIGGERED, triggerData));
 
         if (managerContext != null && managerContext.isRuntimeRunning()) {
             JsonObject triggerMsg = new JsonObject();
