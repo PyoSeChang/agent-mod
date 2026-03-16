@@ -2,6 +2,9 @@ package com.pyosechang.agent.core.action;
 
 import com.google.gson.JsonObject;
 import com.mojang.logging.LogUtils;
+import com.pyosechang.agent.event.AgentEvent;
+import com.pyosechang.agent.event.EventBus;
+import com.pyosechang.agent.event.EventType;
 import net.minecraft.server.level.ServerPlayer;
 import org.slf4j.Logger;
 
@@ -18,8 +21,13 @@ public class ActiveActionManager {
 
     private static final Logger LOGGER = LogUtils.getLogger();
 
+    private final String agentName;
     private AsyncAction currentAction;
     private CompletableFuture<JsonObject> currentFuture;
+
+    public ActiveActionManager(String agentName) {
+        this.agentName = agentName;
+    }
 
     /**
      * Start a new async action, cancelling any currently running one.
@@ -33,7 +41,25 @@ public class ActiveActionManager {
         }
 
         currentAction = action;
+
+        JsonObject startData = new JsonObject();
+        startData.addProperty("action", action.getName());
+        EventBus.getInstance().publish(AgentEvent.of(agentName, EventType.ACTION_STARTED, startData));
+
         currentFuture = action.start(agent, params);
+        currentFuture.whenComplete((result, ex) -> {
+            JsonObject data = new JsonObject();
+            data.addProperty("action", action.getName());
+            if (ex != null) {
+                data.addProperty("error", ex.getMessage());
+                EventBus.getInstance().publish(AgentEvent.of(agentName, EventType.ACTION_FAILED, data));
+            } else if (result != null && result.has("ok") && !result.get("ok").getAsBoolean()) {
+                data.addProperty("error", result.has("error") ? result.get("error").getAsString() : "unknown");
+                EventBus.getInstance().publish(AgentEvent.of(agentName, EventType.ACTION_FAILED, data));
+            } else {
+                EventBus.getInstance().publish(AgentEvent.of(agentName, EventType.ACTION_COMPLETED, data));
+            }
+        });
         return currentFuture;
     }
 

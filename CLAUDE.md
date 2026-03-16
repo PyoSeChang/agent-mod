@@ -71,6 +71,14 @@ agent-mod/
 │   │   └── pathfinding/
 │   │       ├── Pathfinder.java       # A* algorithm
 │   │       └── PathFollower.java     # Tick-based smooth movement
+│   ├── event/
+│   │   ├── EventType.java            # Event type enum (runtime, lifecycle, schedule, action)
+│   │   ├── AgentEvent.java           # Event record (timestamp, agentName, type, data) + SSE/JSON
+│   │   ├── EventBus.java             # Singleton pub/sub bus with ring buffer history
+│   │   ├── EventSubscriber.java      # Functional subscriber interface
+│   │   ├── ChatSubscriber.java       # EventBus → in-game chat (replaces ChatMonitor)
+│   │   ├── SSESubscriber.java        # EventBus → SSE streams (for TUI)
+│   │   └── LogSubscriber.java        # EventBus → AgentLogger (action events)
 │   ├── client/
 │   │   ├── ClientSetup.java          # Keybindings (M=memory, G=agents)
 │   │   ├── BridgeClient.java         # Async HTTP client (GUI ↔ server)
@@ -191,6 +199,7 @@ The Manager is a bodiless orchestrator — no FakePlayer, no action tools. It cr
 | `multi-agent` | Agent lifecycle, persona, commands, management GUI | AgentContext, AgentManager, PersonaConfig, AgentCommand |
 | `memory` | Knowledge persistence, scoping, memory GUI | MemoryManager, MemoryEntry, MemoryLocation, MemoryListScreen |
 | `schedule` | Schedule system, observer events, Agent Manager | ScheduleManager, ObserverManager, ManagerContext, ManagerCommand |
+| `event` | Event bus, subscribers, SSE streaming | EventBus, EventType, AgentEvent, ChatSubscriber, SSESubscriber, LogSubscriber |
 | `infra` | Plumbing (HTTP bridge, pathfinding, runtime, logging) | AgentHttpServer, Pathfinder, RuntimeManager, ManagerRuntimeManager, AgentLogger |
 
 See `docs/quality/components/index.md` for full definitions and per-component changelogs.

@@ -11,8 +11,10 @@ import com.pyosechang.agent.client.ClientSetup;
 import com.pyosechang.agent.core.memory.MemoryManager;
 import com.pyosechang.agent.core.schedule.ManagerContext;
 import com.pyosechang.agent.core.schedule.ScheduleManager;
-import com.pyosechang.agent.monitor.ChatMonitor;
-import com.pyosechang.agent.monitor.TerminalIntegration;
+import com.pyosechang.agent.event.ChatSubscriber;
+import com.pyosechang.agent.event.EventBus;
+import com.pyosechang.agent.event.LogSubscriber;
+import com.pyosechang.agent.event.SSESubscriber;
 import com.pyosechang.agent.network.AgentHttpServer;
 import com.pyosechang.agent.runtime.ManagerRuntimeManager;
 import com.pyosechang.agent.runtime.RuntimeManager;
@@ -73,9 +75,10 @@ public class AgentMod {
         reg.register(new SmeltAction());
         reg.register(new UseItemOnAction());
 
-        // Initialize monitoring
-        ChatMonitor.setServer(event.getServer());
-        TerminalIntegration.initialize();
+        // Initialize EventBus subscribers
+        EventBus.getInstance().subscribe(new ChatSubscriber(event.getServer()));
+        EventBus.getInstance().subscribe(SSESubscriber.getInstance());
+        EventBus.getInstance().subscribe(new LogSubscriber());
 
         // Register mod compats (only loads if mods are present)
         CompatRegistry.getInstance().register(new AE2Compat());

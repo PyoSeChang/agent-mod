@@ -1,7 +1,11 @@
 package com.pyosechang.agent.core;
 
+import com.google.gson.JsonObject;
 import com.mojang.authlib.GameProfile;
 import com.mojang.logging.LogUtils;
+import com.pyosechang.agent.event.AgentEvent;
+import com.pyosechang.agent.event.EventBus;
+import com.pyosechang.agent.event.EventType;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.protocol.game.ClientboundAddPlayerPacket;
 import net.minecraft.network.protocol.game.ClientboundPlayerInfoRemovePacket;
@@ -92,6 +96,13 @@ public class AgentManager {
         }
 
         LOGGER.info("Agent '{}' spawned at {} {} {}", name, pos.getX(), pos.getY(), pos.getZ());
+
+        JsonObject data = new JsonObject();
+        data.addProperty("x", pos.getX());
+        data.addProperty("y", pos.getY());
+        data.addProperty("z", pos.getZ());
+        EventBus.getInstance().publish(AgentEvent.of(name, EventType.SPAWNED, data));
+
         return true;
     }
 
@@ -117,6 +128,8 @@ public class AgentManager {
         agentPlayer.discard();
 
         LOGGER.info("Agent '{}' despawned", name);
+        EventBus.getInstance().publish(AgentEvent.of(name, EventType.DESPAWNED));
+
         return true;
     }
 

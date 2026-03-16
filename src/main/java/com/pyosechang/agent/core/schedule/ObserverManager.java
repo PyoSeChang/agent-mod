@@ -5,6 +5,9 @@ import com.google.gson.JsonObject;
 import com.mojang.logging.LogUtils;
 import com.pyosechang.agent.AgentMod;
 import com.pyosechang.agent.core.memory.ScheduleMemory;
+import com.pyosechang.agent.event.AgentEvent;
+import com.pyosechang.agent.event.EventBus;
+import com.pyosechang.agent.event.EventType;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.properties.Property;
@@ -180,6 +183,16 @@ public class ObserverManager {
                 if (triggered.size() >= threshold) {
                     LOGGER.info("Observer threshold reached for schedule '{}' ({}/{})",
                         reg.scheduleId(), triggered.size(), threshold);
+
+                    JsonObject data = new JsonObject();
+                    data.addProperty("scheduleId", reg.scheduleId());
+                    data.addProperty("eventType", eventType);
+                    data.addProperty("x", pos.getX());
+                    data.addProperty("y", pos.getY());
+                    data.addProperty("z", pos.getZ());
+                    String target = se.getConfig().getTargetAgent();
+                    EventBus.getInstance().publish(AgentEvent.of(target != null ? target : "unknown", EventType.OBSERVER_FIRED, data));
+
                     triggered.clear(); // Reset for next cycle
                     ScheduleManager.getInstance().onObserverTriggered(reg.scheduleId());
                 }
@@ -209,6 +222,13 @@ public class ObserverManager {
 
                 ScheduleMemory se = ScheduleManager.getInstance().get(reg.scheduleId());
                 if (se != null && triggered.size() >= se.getConfig().getThreshold()) {
+                    JsonObject data = new JsonObject();
+                    data.addProperty("scheduleId", reg.scheduleId());
+                    data.addProperty("eventType", eventType);
+                    data.addProperty("entityType", entityType);
+                    String target = se.getConfig().getTargetAgent();
+                    EventBus.getInstance().publish(AgentEvent.of(target != null ? target : "unknown", EventType.OBSERVER_FIRED, data));
+
                     triggered.clear();
                     ScheduleManager.getInstance().onObserverTriggered(reg.scheduleId());
                 }

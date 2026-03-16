@@ -28,7 +28,7 @@ public class AgentContext {
         this.name = name;
         this.player = player;
         this.persona = persona;
-        this.actionManager = new ActiveActionManager();
+        this.actionManager = new ActiveActionManager(name);
         this.interventionQueue = new InterventionQueue();
         this.sessionId = UUID.randomUUID().toString();
     }
