@@ -46,7 +46,13 @@ public class RuntimeManager {
             return;
         }
 
-        Path runtimePath = FMLPaths.GAMEDIR.get().resolve("../agent-runtime").normalize();
+        Path gameDir = FMLPaths.GAMEDIR.get();
+        // Dev: agent-runtime is sibling to run/ dir; Deployed: inside game dir
+        Path runtimeCandidate = gameDir.resolve("agent-runtime");
+        if (!runtimeCandidate.toFile().isDirectory()) {
+            runtimeCandidate = gameDir.resolve("../agent-runtime").normalize();
+        }
+        final Path runtimePath = runtimeCandidate;
         String nodeCmd = resolveNodeCommand();
 
         Thread runtimeThread = new Thread(() -> {
@@ -168,16 +174,51 @@ public class RuntimeManager {
             if (exit == 0) return cmd;
         } catch (Exception ignored) {}
 
-        // Windows: check common install locations
         if (isWindows) {
-            String[] candidates = {
-                System.getenv("ProgramFiles") + "\\nodejs\\node.exe",
-                System.getenv("LOCALAPPDATA") + "\\fnm_multishells\\node.exe",
-                System.getProperty("user.home") + "\\.nvm\\current\\node.exe",
-                System.getenv("ProgramFiles") + " (x86)\\nodejs\\node.exe"
-            };
+            // Try 'where' command — finds node even if current PATH is incomplete
+            try {
+                Process where = new ProcessBuilder("C:\\Windows\\System32\\where.exe", "node.exe")
+                    .redirectErrorStream(true).start();
+                String output = new String(where.getInputStream().readAllBytes()).trim();
+                int exit = where.waitFor();
+                if (exit == 0 && !output.isEmpty()) {
+                    String found = output.lines().findFirst().orElse("").trim();
+                    if (!found.isEmpty() && new java.io.File(found).isFile()) {
+                        LOGGER.info("Found node via 'where': {}", found);
+                        return found;
+                    }
+                }
+            } catch (Exception ignored) {}
+
+            // Check common install locations
+            java.util.List<String> candidates = new java.util.ArrayList<>();
+            String programFiles = System.getenv("ProgramFiles");
+            String programFilesX86 = System.getenv("ProgramFiles(x86)");
+            String localAppData = System.getenv("LOCALAPPDATA");
+            String appData = System.getenv("APPDATA");
+            String userHome = System.getProperty("user.home");
+
+            if (programFiles != null) candidates.add(programFiles + "\\nodejs\\node.exe");
+            if (programFilesX86 != null) candidates.add(programFilesX86 + "\\nodejs\\node.exe");
+            if (localAppData != null) candidates.add(localAppData + "\\Programs\\node\\node.exe");
+            if (appData != null) candidates.add(appData + "\\fnm\\aliases\\default\\node.exe");
+            if (appData != null) candidates.add(appData + "\\nvm\\current\\node.exe");
+            if (localAppData != null) candidates.add(localAppData + "\\volta\\bin\\node.exe");
+            if (userHome != null) candidates.add(userHome + "\\.nvm\\current\\node.exe");
+            // Absolute fallback
+            candidates.add("C:\\Program Files\\nodejs\\node.exe");
+
             for (String path : candidates) {
-                if (path != null && new java.io.File(path).isFile()) {
+                if (new java.io.File(path).isFile()) {
+                    LOGGER.info("Found node at: {}", path);
+                    return path;
+                }
+            }
+        } else {
+            // Unix: check common locations
+            String[] candidates = {"/usr/local/bin/node", "/usr/bin/node", "/opt/homebrew/bin/node"};
+            for (String path : candidates) {
+                if (new java.io.File(path).isFile()) {
                     LOGGER.info("Found node at: {}", path);
                     return path;
                 }

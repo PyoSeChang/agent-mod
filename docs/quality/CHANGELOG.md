@@ -1,5 +1,18 @@
 # CHANGELOG
 
+## v0.6.2 — 2026-03-16 `[infra]`
+
+모드팩(CurseForge 등) 배포 환경에서 agent-runtime 실행 실패 수정.
+
+### 변경 사항
+
+**`infra`**
+- RuntimeManager, ManagerRuntimeManager: agent-runtime 경로를 게임 폴더 내부 우선 탐색으로 변경 (배포 환경 호환)
+- resolveNodeCommand(): `where.exe` 탐색 추가, null-safe fallback 경로 보강 (fnm/volta/nvm-windows), 하드코딩 절대경로 fallback
+- deploy.js: slim JAR 대신 shadowJar 배포하도록 필터 수정, 기존 agent JAR 자동 삭제 추가
+
+---
+
 ## v0.6.0 — 2026-03-16 `[event, infra, brain]`
 
 EventBus 시스템 + Go Bubbletea 기반 Agent TUI. 마인크래프트 밖에서 에이전트와 실시간 대화/제어 가능. 인게임 채팅은 에이전트 응답(CHAT)만 표시하도록 정리.

@@ -57,7 +57,12 @@ public class ManagerRuntimeManager {
             return;
         }
 
-        Path runtimePath = FMLPaths.GAMEDIR.get().resolve("../agent-runtime").normalize();
+        Path gameDir = FMLPaths.GAMEDIR.get();
+        Path runtimeCandidate = gameDir.resolve("agent-runtime");
+        if (!runtimeCandidate.toFile().isDirectory()) {
+            runtimeCandidate = gameDir.resolve("../agent-runtime").normalize();
+        }
+        final Path runtimePath = runtimeCandidate;
         String nodeCmd = RuntimeManager.resolveNodeCommand();
 
         Thread runtimeThread = new Thread(() -> {
