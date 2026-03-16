@@ -11,6 +11,7 @@ import net.minecraft.client.gui.components.MultiLineEditBox;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.resources.language.I18n;
 import net.minecraft.network.chat.Component;
+import net.minecraft.network.chat.Style;
 
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -18,46 +19,66 @@ import java.util.List;
 import java.util.Set;
 
 /**
- * Agent management screen.
- * Layout: [Agent List | Form Fields | Tools]
- * No title bar. Agent list full height. Two-column right panel.
+ * Agent management screen with two pages: Management and Monitor.
+ * Layout: Tab bar at top, shared agent list on the left, right panel switches by page.
+ * Shared left panel: Agent list (110px) — same selection state on both pages.
+ * Management right panel: [Form Fields | Tools]
+ * Monitor right panel: [Conversation Log + Command Input + Status Bar]
  */
 public class AgentManagementScreen extends Screen {
+
+    // --- Page enum ---
+    private enum Page { MANAGEMENT, MONITOR }
+    private Page currentPage = Page.MONITOR;
+
+    // --- Shared constants ---
     private static final int LEFT_W = 110;
     private static final int ENTRY_H = 22;
-    private static final int LIST_TOP = 36;
+    private static final int LIST_TOP = 46;
+    private static final int TAB_BAR_H = 14;
 
-    // Agent list
+    // --- Monitor page constants ---
+    private static final int MON_LINE_H = 11;
+    private static final int MON_STATUS_GREEN = 0xFF55FF55;
+    private static final int MON_STATUS_BLUE = 0xFF5555FF;
+    private static final int MON_DIM_GRAY = 0xFF6C6C6C;
+    private static final int MON_BG_DARK = 0xFF0C0C0C;
+
+    // Shared agent list state (used on both pages)
     private List<JsonObject> agents = new ArrayList<>();
     private List<JsonObject> filteredAgents = new ArrayList<>();
     private int selectedIndex = -1;
     private int listScroll = 0;
     private EditBox searchBox;
 
-    // Form fields (middle column)
+    // Form fields (middle column, Management page)
     private EditBox nameBox;
     private MultiLineEditBox roleBox;
     private MultiLineEditBox personalityBox;
 
-    // Tools (right column)
+    // Tools (right column, Management page)
     private List<String> availableTools = new ArrayList<>();
     private Set<String> selectedTools = new HashSet<>();
     private int toolScroll = 0;
 
-    // Buttons
+    // Buttons (Management page)
     private Button createBtn, deleteBtn, spawnBtn, despawnBtn, saveBtn;
 
-    // State
+    // State (Management page)
     private String selectedAgentName = null;
     private boolean selectedSpawned = false;
     private boolean createMode = false;
 
-    // Layout computed values
+    // Layout computed values (Management page)
     private int midX, midW, toolX, toolW, toolListY;
 
-    // Tooltip state (deferred rendering)
+    // Tooltip state (deferred rendering, Management page)
     private String pendingTooltipTool = null;
     private int pendingTooltipX, pendingTooltipY;
+
+    // --- Monitor page state ---
+    private MonitorState monitorState;
+    private EditBox commandInput;
 
     public AgentManagementScreen() {
         super(Component.translatable("gui.agent.management.title"));
@@ -65,7 +86,24 @@ public class AgentManagementScreen extends Screen {
 
     @Override
     protected void init() {
-        // Layout columns — center form+tools in right area
+        // Shared: agent list search box (always present on both pages)
+        searchBox = new EditBox(font, 4, TAB_BAR_H + 16, LEFT_W - 8, 14, Component.translatable("gui.agent.management.search"));
+        searchBox.setHint(Component.translatable("gui.agent.management.search_hint"));
+        searchBox.setResponder(text -> filterAgents());
+        addRenderableWidget(searchBox);
+
+        // Always refresh agent list on both pages
+        refreshAgentList();
+
+        if (currentPage == Page.MANAGEMENT) {
+            initManagement();
+        } else {
+            initMonitor();
+        }
+    }
+
+    private void initManagement() {
+        // Layout columns -- center form+tools in right area
         int leftEnd = LEFT_W;
         int rightArea = width - leftEnd;
         int gap = 16;
@@ -74,12 +112,6 @@ public class AgentManagementScreen extends Screen {
         int totalContentW = midW + gap + toolW;
         midX = leftEnd + (rightArea - totalContentW) / 2;
         toolX = midX + midW + gap;
-
-        // Agent list search box
-        searchBox = new EditBox(font, 4, 18, LEFT_W - 8, 14, Component.translatable("gui.agent.management.search"));
-        searchBox.setHint(Component.translatable("gui.agent.management.search_hint"));
-        searchBox.setResponder(text -> filterAgents());
-        addRenderableWidget(searchBox);
 
         // Vertically center form: name(28) + role(100+12) + pers(120+12) = ~272
         int formH = 28 + 12 + 100 + 14 + 120;
@@ -139,9 +171,37 @@ public class AgentManagementScreen extends Screen {
 
         updateVisibility();
         updateButtons();
-        refreshAgentList();
         loadAvailableTools();
     }
+
+    private void initMonitor() {
+        // Lazily create MonitorState on first Monitor page switch
+        if (monitorState == null) {
+            monitorState = new MonitorState();
+            monitorState.connect();
+            monitorState.loadSessionInfo();
+            monitorState.loadHistory();
+        }
+
+        // Command input at bottom of right panel
+        int inputY = height - 34;
+        int inputX = LEFT_W + 6;
+        int inputW = width - inputX - 6;
+        commandInput = new EditBox(font, inputX, inputY, inputW, 14, Component.literal("command"));
+        commandInput.setHint(Component.literal("Type a command...").withStyle(Style.EMPTY.withColor(0xFF555555)));
+        commandInput.setMaxLength(500);
+        addRenderableWidget(commandInput);
+    }
+
+    // --- Page switching ---
+
+    private void switchPage(Page page) {
+        if (currentPage == page) return;
+        currentPage = page;
+        rebuildWidgets();
+    }
+
+    // --- Management page methods ---
 
     private void loadAvailableTools() {
         BridgeClient.get("/agent/_tools_/persona").thenAccept(result -> {
@@ -181,10 +241,11 @@ public class AgentManagementScreen extends Screen {
 
     private void updateButtons() {
         boolean hasAgent = selectedAgentName != null && !createMode;
-        deleteBtn.active = hasAgent && !selectedSpawned;
-        spawnBtn.active = hasAgent && !selectedSpawned;
-        despawnBtn.active = hasAgent && selectedSpawned;
-        saveBtn.active = hasAgent;
+        boolean isManager = "manager".equals(selectedAgentName);
+        deleteBtn.active = hasAgent && !selectedSpawned && !isManager;
+        spawnBtn.active = hasAgent && !selectedSpawned && !isManager;
+        despawnBtn.active = hasAgent && selectedSpawned && !isManager;
+        saveBtn.active = hasAgent && !isManager;
         createBtn.setMessage(Component.translatable(createMode ? "gui.agent.management.confirm" : "gui.agent.management.create"));
     }
 
@@ -192,7 +253,19 @@ public class AgentManagementScreen extends Screen {
         BridgeClient.get("/agents/list").thenAccept(result -> {
             if (result.has("agents")) {
                 List<JsonObject> list = new ArrayList<>();
-                for (JsonElement el : result.getAsJsonArray("agents")) list.add(el.getAsJsonObject());
+                // Always include manager as first entry
+                boolean hasManager = false;
+                for (JsonElement el : result.getAsJsonArray("agents")) {
+                    JsonObject a = el.getAsJsonObject();
+                    if ("manager".equals(a.get("name").getAsString())) hasManager = true;
+                    list.add(a);
+                }
+                if (!hasManager) {
+                    JsonObject mgr = new JsonObject();
+                    mgr.addProperty("name", "manager");
+                    mgr.addProperty("spawned", false);
+                    list.add(0, mgr);
+                }
                 Minecraft.getInstance().tell(() -> {
                     agents = list;
                     filterAgents();
@@ -219,36 +292,57 @@ public class AgentManagementScreen extends Screen {
         selectedAgentName = agent.get("name").getAsString();
         selectedSpawned = agent.has("spawned") && agent.get("spawned").getAsBoolean();
 
-        nameBox.setValue(selectedAgentName);
+        // Sync monitor state if available
+        syncMonitorSelection();
 
-        BridgeClient.get("/agent/" + selectedAgentName + "/persona").thenAccept(result -> {
-            Minecraft.getInstance().tell(() -> {
-                roleBox.setValue(result.has("role") ? result.get("role").getAsString() : "");
-                personalityBox.setValue(result.has("personality") ? result.get("personality").getAsString() : "");
+        // Only load persona details if on Management page (form fields exist)
+        if (currentPage == Page.MANAGEMENT) {
+            nameBox.setValue(selectedAgentName);
 
-                selectedTools.clear();
-                availableTools.clear();
-                if (result.has("available_tools")) {
-                    for (JsonElement el : result.getAsJsonArray("available_tools")) {
-                        String t = el.getAsString();
-                        availableTools.add(t);
-                        selectedTools.add(t);
-                    }
-                }
-                if (result.has("tools") && result.getAsJsonArray("tools").size() > 0) {
+            BridgeClient.get("/agent/" + selectedAgentName + "/persona").thenAccept(result -> {
+                Minecraft.getInstance().tell(() -> {
+                    roleBox.setValue(result.has("role") ? result.get("role").getAsString() : "");
+                    personalityBox.setValue(result.has("personality") ? result.get("personality").getAsString() : "");
+
                     selectedTools.clear();
-                    for (JsonElement el : result.getAsJsonArray("tools")) {
-                        selectedTools.add(el.getAsString());
+                    availableTools.clear();
+                    if (result.has("available_tools")) {
+                        for (JsonElement el : result.getAsJsonArray("available_tools")) {
+                            String t = el.getAsString();
+                            availableTools.add(t);
+                            selectedTools.add(t);
+                        }
                     }
-                }
-                selectedSpawned = result.has("spawned") && result.get("spawned").getAsBoolean();
-                toolScroll = 0;
-                updateVisibility();
-                updateButtons();
+                    if (result.has("tools") && result.getAsJsonArray("tools").size() > 0) {
+                        selectedTools.clear();
+                        for (JsonElement el : result.getAsJsonArray("tools")) {
+                            selectedTools.add(el.getAsString());
+                        }
+                    }
+                    selectedSpawned = result.has("spawned") && result.get("spawned").getAsBoolean();
+                    toolScroll = 0;
+                    updateVisibility();
+                    updateButtons();
+                });
             });
-        });
-        updateVisibility();
-        updateButtons();
+            updateVisibility();
+            updateButtons();
+        }
+    }
+
+    /**
+     * Sync the shared agent list selection to MonitorState.
+     * Finds the selected agent name in monitorState's sorted names and selects it.
+     */
+    private void syncMonitorSelection() {
+        if (monitorState == null || selectedAgentName == null) return;
+        List<String> monNames = monitorState.getSortedNames();
+        for (int i = 0; i < monNames.size(); i++) {
+            if (selectedAgentName.equals(monNames.get(i))) {
+                monitorState.selectAgent(i);
+                return;
+            }
+        }
     }
 
     private void clearSelection() {
@@ -256,12 +350,14 @@ public class AgentManagementScreen extends Screen {
         selectedAgentName = null;
         selectedSpawned = false;
         createMode = false;
-        nameBox.setValue("");
-        roleBox.setValue("");
-        personalityBox.setValue("");
-        selectedTools.clear();
-        updateVisibility();
-        updateButtons();
+        if (currentPage == Page.MANAGEMENT) {
+            nameBox.setValue("");
+            roleBox.setValue("");
+            personalityBox.setValue("");
+            selectedTools.clear();
+            updateVisibility();
+            updateButtons();
+        }
     }
 
     private void enterCreateMode() {
@@ -390,16 +486,62 @@ public class AgentManagementScreen extends Screen {
     @Override
     public void render(GuiGraphics g, int mouseX, int mouseY, float partialTick) {
         renderBackground(g);
+        renderTabBar(g, mouseX, mouseY);
 
-        // Title bar
-        g.fill(0, 0, width, 14, 0x80000000);
-        g.drawCenteredString(font, title, width / 2, 3, 0xFFFFFF);
+        // Shared left panel: agent list (always rendered on both pages)
+        renderSharedAgentList(g, mouseX, mouseY);
 
+        if (currentPage == Page.MANAGEMENT) {
+            renderManagementRightPanel(g, mouseX, mouseY, partialTick);
+        } else {
+            renderMonitorRightPanel(g, mouseX, mouseY, partialTick);
+        }
+    }
+
+    private void renderTabBar(GuiGraphics g, int mouseX, int mouseY) {
+        // Tab bar background
+        g.fill(0, 0, width, TAB_BAR_H, 0xFF1A1A1A);
+
+        // Tab definitions
+        String mgmtLabel = "[Management]";
+        String monLabel = "[Monitor]";
+        int mgmtW = font.width(mgmtLabel);
+        int monW = font.width(monLabel);
+
+        int tabGap = 8;
+        int totalW = mgmtW + tabGap + monW;
+        int startX = width / 2 - totalW / 2;
+
+        // Management tab
+        int mgmtColor = currentPage == Page.MANAGEMENT ? 0xFFFFFFFF : 0xFF888888;
+        boolean mgmtHovered = mouseX >= startX && mouseX < startX + mgmtW && mouseY >= 0 && mouseY < TAB_BAR_H;
+        if (mgmtHovered && currentPage != Page.MANAGEMENT) mgmtColor = 0xFFBBBBBB;
+        g.drawString(font, mgmtLabel, startX, 3, mgmtColor);
+        if (currentPage == Page.MANAGEMENT) {
+            g.fill(startX, TAB_BAR_H - 1, startX + mgmtW, TAB_BAR_H, 0xFFFFFFFF);
+        }
+
+        // Monitor tab
+        int monX = startX + mgmtW + tabGap;
+        int monColor = currentPage == Page.MONITOR ? 0xFFFFFFFF : 0xFF888888;
+        boolean monHovered = mouseX >= monX && mouseX < monX + monW && mouseY >= 0 && mouseY < TAB_BAR_H;
+        if (monHovered && currentPage != Page.MONITOR) monColor = 0xFFBBBBBB;
+        g.drawString(font, monLabel, monX, 3, monColor);
+        if (currentPage == Page.MONITOR) {
+            g.fill(monX, TAB_BAR_H - 1, monX + monW, TAB_BAR_H, 0xFFFFFFFF);
+        }
+    }
+
+    /**
+     * Shared left panel: agent list rendered on both Management and Monitor pages.
+     * Uses the shared filteredAgents/selectedIndex/listScroll state.
+     */
+    private void renderSharedAgentList(GuiGraphics g, int mouseX, int mouseY) {
         int leftEnd = LEFT_W;
 
-        // === Left panel: agent list (full height) ===
-        g.fill(0, 14, leftEnd, height, 0x80000000);
-        g.drawString(font, I18n.get("gui.agent.management.agents_count", filteredAgents.size()), 6, 4, 0xCCCCCC);
+        // Background
+        g.fill(0, TAB_BAR_H, leftEnd, height, 0xFF1A1A1A);
+        g.drawString(font, I18n.get("gui.agent.management.agents_count", filteredAgents.size()), 6, TAB_BAR_H + 4, 0xCCCCCC);
         g.fill(4, LIST_TOP - 2, leftEnd - 4, LIST_TOP - 1, 0x30FFFFFF);
 
         int listBottom = height - 30;
@@ -444,7 +586,9 @@ public class AgentManagementScreen extends Screen {
 
         // Separator
         g.fill(leftEnd, 0, leftEnd + 1, height, 0x30FFFFFF);
+    }
 
+    private void renderManagementRightPanel(GuiGraphics g, int mouseX, int mouseY, float partialTick) {
         // === Middle column: form fields ===
         if (selectedAgentName != null || createMode) {
             // Match vertical centering from init()
@@ -551,15 +695,112 @@ public class AgentManagementScreen extends Screen {
         }
     }
 
+    private void renderMonitorRightPanel(GuiGraphics g, int mouseX, int mouseY, float partialTick) {
+        if (monitorState == null) {
+            super.render(g, mouseX, mouseY, partialTick);
+            return;
+        }
+
+        Style monFont = Style.EMPTY.withFont(EventFormatter.MONITOR_FONT);
+
+        // === Right panel: Conversation log ===
+        int logLeft = LEFT_W + 1;
+        int logTop = TAB_BAR_H;
+        int logBottom = height - 40;
+        int logRight = width;
+
+        // Dark background
+        g.fill(logLeft, logTop, logRight, logBottom, MON_BG_DARK);
+
+        // Render conversation messages
+        List<MonitorMessage> messages = monitorState.getVisibleMessages();
+        int scrollOffset = monitorState.getScrollOffset();
+
+        // Calculate total lines
+        int totalLines = 0;
+        for (MonitorMessage msg : messages) {
+            totalLines += msg.lines().size();
+        }
+
+        // Visible lines count
+        int visibleLines = (logBottom - logTop) / MON_LINE_H;
+
+        // Render from bottom up with scroll offset
+        g.enableScissor(logLeft, logTop, logRight, logBottom);
+        int renderY = logBottom - MON_LINE_H;
+        int linesSkipped = 0;
+
+        // Walk messages backward
+        for (int m = messages.size() - 1; m >= 0 && renderY >= logTop - MON_LINE_H; m--) {
+            MonitorMessage msg = messages.get(m);
+            List<Component> lines = msg.lines();
+
+            // Walk lines backward within message
+            for (int l = lines.size() - 1; l >= 0 && renderY >= logTop - MON_LINE_H; l--) {
+                if (linesSkipped < scrollOffset) {
+                    linesSkipped++;
+                    continue;
+                }
+                g.drawString(font, lines.get(l), logLeft + 4, renderY, 0xFFFFFF, false);
+                renderY -= MON_LINE_H;
+            }
+        }
+        g.disableScissor();
+
+        // Log scrollbar
+        if (totalLines > visibleLines && visibleLines > 0) {
+            int maxScrollVal = Math.max(totalLines - visibleLines, 1);
+            int barH = Math.max(6, visibleLines * (logBottom - logTop) / totalLines);
+            int barTrack = logBottom - logTop - barH;
+            int barY = logTop + barTrack - (scrollOffset * barTrack) / maxScrollVal;
+            g.fill(logRight - 3, barY, logRight - 1, barY + barH, 0x40FFFFFF);
+        }
+
+        // === Bottom: Status bar ===
+        int statusLineY = height - 40;
+        g.fill(logLeft, statusLineY, logRight, statusLineY + 1, 0x30FFFFFF);
+
+        // Status bar text
+        int statusTextY = height - 16;
+        String sseStatus = monitorState.getSSEStatus();
+        String verboseHint = monitorState.isVerbose() ? "Verbose ON" : "Verbose OFF";
+        String statusText = "SSE: " + sseStatus + "  |  Ctrl+O: " + verboseHint + "  |  \u2191\u2193: select agent";
+        g.drawString(font, Component.literal(statusText).withStyle(monFont.withColor(MON_DIM_GRAY)),
+            logLeft + 4, statusTextY, MON_DIM_GRAY, false);
+
+        super.render(g, mouseX, mouseY, partialTick);
+    }
+
+    // === Input handling ===
+
     @Override
     public boolean mouseClicked(double mouseX, double mouseY, int button) {
         if (button == 0) {
-            int leftEnd = LEFT_W;
-            int listBottom = height - 30;
-            int visibleEntries = (listBottom - LIST_TOP) / ENTRY_H;
+            // Tab bar click
+            if (mouseY >= 0 && mouseY < TAB_BAR_H) {
+                String mgmtLabel = "[Management]";
+                String monLabel = "[Monitor]";
+                int mgmtW = font.width(mgmtLabel);
+                int monW = font.width(monLabel);
+                int tabGap = 8;
+                int totalW = mgmtW + tabGap + monW;
+                int startX = width / 2 - totalW / 2;
 
-            // Left panel: agent selection
-            if (mouseX >= 2 && mouseX < leftEnd - 2) {
+                if (mouseX >= startX && mouseX < startX + mgmtW) {
+                    switchPage(Page.MANAGEMENT);
+                    return true;
+                }
+                int monX = startX + mgmtW + tabGap;
+                if (mouseX >= monX && mouseX < monX + monW) {
+                    switchPage(Page.MONITOR);
+                    return true;
+                }
+            }
+
+            // Shared left panel: agent list click (works on both pages)
+            if (mouseX >= 2 && mouseX < LEFT_W - 2 && mouseY >= LIST_TOP) {
+                int listBottom = height - 30;
+                int visibleEntries = (listBottom - LIST_TOP) / ENTRY_H;
                 for (int i = 0; i < visibleEntries && i + listScroll < filteredAgents.size(); i++) {
                     int ey = LIST_TOP + i * ENTRY_H;
                     if (mouseY >= ey && mouseY < ey + ENTRY_H - 2) {
@@ -569,36 +810,170 @@ public class AgentManagementScreen extends Screen {
                 }
             }
 
-            // Right column: tool checkbox click
-            if ((selectedAgentName != null || createMode) && mouseX >= toolX) {
-                int ty = toolListY;
-                int toolsBottom2 = height - 34;
-                int toolVis = Math.max(1, (toolsBottom2 - ty) / 13);
+            // Right panel clicks (page-specific)
+            if (currentPage == Page.MANAGEMENT) {
+                return mouseClickedManagementRight(mouseX, mouseY, button);
+            }
+            // Monitor right panel has no special click handling beyond widgets
+        }
+        return super.mouseClicked(mouseX, mouseY, button);
+    }
 
-                for (int i = 0; i < toolVis && i + toolScroll < availableTools.size(); i++) {
-                    int cy = ty + i * 13;
-                    if (mouseY >= cy && mouseY < cy + 12 && mouseX >= toolX && mouseX < width - 6) {
-                        String tool = availableTools.get(i + toolScroll);
-                        if (selectedTools.contains(tool)) selectedTools.remove(tool);
-                        else selectedTools.add(tool);
-                        return true;
-                    }
+    private boolean mouseClickedManagementRight(double mouseX, double mouseY, int button) {
+        // Right column: tool checkbox click
+        if ((selectedAgentName != null || createMode) && mouseX >= toolX) {
+            int ty = toolListY;
+            int toolsBottom2 = height - 34;
+            int toolVis = Math.max(1, (toolsBottom2 - ty) / 13);
+
+            for (int i = 0; i < toolVis && i + toolScroll < availableTools.size(); i++) {
+                int cy = ty + i * 13;
+                if (mouseY >= cy && mouseY < cy + 12 && mouseX >= toolX && mouseX < width - 6) {
+                    String tool = availableTools.get(i + toolScroll);
+                    if (selectedTools.contains(tool)) selectedTools.remove(tool);
+                    else selectedTools.add(tool);
+                    return true;
                 }
             }
         }
+
         return super.mouseClicked(mouseX, mouseY, button);
     }
 
     @Override
     public boolean mouseScrolled(double mouseX, double mouseY, double delta) {
         if (mouseX < LEFT_W) {
+            // Shared agent list scroll (both pages)
             listScroll -= (int) delta;
             listScroll = Math.max(0, listScroll);
-        } else if (mouseX >= toolX) {
-            toolScroll -= (int) delta;
-            toolScroll = Math.max(0, toolScroll);
+            return true;
         }
-        return true;
+
+        if (currentPage == Page.MANAGEMENT) {
+            if (mouseX >= toolX) {
+                toolScroll -= (int) delta;
+                toolScroll = Math.max(0, toolScroll);
+            }
+            return true;
+        } else {
+            // Monitor page: conversation log scroll
+            if (monitorState == null) return true;
+            int lines = 3;
+            if (delta > 0) {
+                monitorState.scrollUp(lines);
+            } else {
+                monitorState.scrollDown(lines);
+            }
+            return true;
+        }
+    }
+
+    @Override
+    public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
+        // Tab switching with 1/2 keys (only when no EditBox is focused)
+        boolean editBoxFocused = isEditBoxFocused();
+        if (!editBoxFocused) {
+            if (keyCode == 49) { // '1'
+                switchPage(Page.MANAGEMENT);
+                return true;
+            }
+            if (keyCode == 50) { // '2'
+                switchPage(Page.MONITOR);
+                return true;
+            }
+        }
+
+        if (currentPage == Page.MONITOR) {
+            return keyPressedMonitor(keyCode, scanCode, modifiers);
+        }
+        return super.keyPressed(keyCode, scanCode, modifiers);
+    }
+
+    private boolean keyPressedMonitor(int keyCode, int scanCode, int modifiers) {
+        if (monitorState == null) return super.keyPressed(keyCode, scanCode, modifiers);
+
+        boolean commandFocused = commandInput != null && commandInput.isFocused();
+
+        // Enter: send command
+        if (keyCode == 257 && commandFocused) { // GLFW_KEY_ENTER
+            String text = commandInput.getValue().trim();
+            if (!text.isEmpty()) {
+                sendMonitorCommand(text);
+                commandInput.setValue("");
+            }
+            return true;
+        }
+
+        // Ctrl+O: toggle verbose
+        if (keyCode == 79 && (modifiers & 2) != 0) { // 'O' + Ctrl
+            monitorState.toggleVerbose();
+            return true;
+        }
+
+        // Up/Down arrows: move agent selection (when command input not focused)
+        if (!commandFocused) {
+            if (keyCode == 265) { // GLFW_KEY_UP
+                monitorState.moveUp();
+                return true;
+            }
+            if (keyCode == 264) { // GLFW_KEY_DOWN
+                monitorState.moveDown();
+                return true;
+            }
+        }
+
+        return super.keyPressed(keyCode, scanCode, modifiers);
+    }
+
+    private boolean isEditBoxFocused() {
+        if (searchBox != null && searchBox.isFocused()) return true;
+        if (currentPage == Page.MANAGEMENT) {
+            return (nameBox != null && nameBox.isFocused())
+                || (roleBox != null && roleBox.isFocused())
+                || (personalityBox != null && personalityBox.isFocused());
+        } else {
+            return commandInput != null && commandInput.isFocused();
+        }
+    }
+
+    private void sendMonitorCommand(String text) {
+        String agent = monitorState.getSelectedAgent();
+        monitorState.addUserMessage(text);
+
+        if (text.equalsIgnoreCase("/spawn")) {
+            if (minecraft.player != null) {
+                JsonObject body = new JsonObject();
+                body.addProperty("name", agent);
+                body.addProperty("x", minecraft.player.blockPosition().getX());
+                body.addProperty("y", minecraft.player.blockPosition().getY());
+                body.addProperty("z", minecraft.player.blockPosition().getZ());
+                BridgeClient.post("/agent/" + agent + "/spawn", body);
+            }
+        } else if (text.equalsIgnoreCase("/despawn")) {
+            BridgeClient.post("/agent/" + agent + "/despawn", new JsonObject());
+        } else if (text.equalsIgnoreCase("/stop")) {
+            BridgeClient.post("/agent/" + agent + "/stop", new JsonObject());
+        } else {
+            // Tell agent
+            JsonObject body = new JsonObject();
+            body.addProperty("message", text);
+            if ("manager".equals(agent)) {
+                BridgeClient.post("/manager/tell", body);
+            } else {
+                BridgeClient.post("/agent/" + agent + "/tell", body);
+            }
+        }
+    }
+
+    // === Lifecycle ===
+
+    @Override
+    public void onClose() {
+        if (monitorState != null) {
+            monitorState.disconnect();
+            monitorState = null;
+        }
+        super.onClose();
     }
 
     @Override

@@ -25,7 +25,7 @@ public class BridgeClient {
     private static final Gson GSON = new Gson();
     private static final HttpClient HTTP = HttpClient.newHttpClient();
 
-    private static int getPort() {
+    static int getPort() {
         try {
             Path portFile = FMLPaths.GAMEDIR.get().resolve(".agent/bridge-server.json");
             if (Files.exists(portFile)) {

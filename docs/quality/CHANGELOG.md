@@ -1,5 +1,37 @@
 # CHANGELOG
 
+## v0.7.0 — 2026-03-16 `[multi-agent, event, infra]`
+
+AgentManagementScreen(G키)에 Monitor 페이지 추가. 인게임 네이티브 GUI로 에이전트 실시간 모니터링/제어. terminal-mod 편입 시도 철회 — jediterm/Bubbletea 호환성 문제로 Minecraft GUI 방식 채택.
+
+### 변경 사항
+
+**`multi-agent`**
+- AgentManagementScreen: 페이지 네비게이션 (Management / Monitor) 추가
+  - 탭 바: 클릭 또는 1/2 키로 전환, Monitor가 기본 페이지
+  - 좌측 agent list 공유 — 양쪽 페이지에서 동일한 리스트 사용
+  - manager 항상 agent list 첫 번째에 표시
+  - manager 선택 시 spawn/despawn/delete 버튼 비활성화
+- Monitor 페이지: JetBrains Mono 터미널 폰트로 대화 로그 렌더링
+  - 에이전트별 대화 히스토리 (SSE 이벤트 실시간 수신)
+  - 명령 입력: /spawn, /despawn, /stop 특수 명령 + 일반 메시지
+  - manager 선택 시 /manager/tell로 Agent Manager에게 전달
+  - Ctrl+O: verbose 토글 (thinking/tool_result 등 상세 이벤트 표시)
+  - 스크롤 지원, 자동 스크롤
+
+**`event`**
+- EventFormatter: Go TUI event.go 포팅 — 17개 이벤트 타입 포매팅
+- SSEClient: 클라이언트 사이드 SSE 스트리밍 리더 (데몬 스레드)
+- MonitorState: 에이전트별 메시지/상태 관리, SSE 연결 라이프사이클
+- MonitorMessage: 이벤트 데이터 레코드
+
+**`infra`**
+- JetBrains Mono TTF 폰트를 agent-mod에 등록 (`agent:monitor`)
+- BridgeClient.getPort() package-private 공개
+- terminal-mod 편입 잔여물 완전 제거 (build.gradle, mods.toml, settings.gradle 원복)
+
+---
+
 ## v0.6.2 — 2026-03-16 `[infra]`
 
 모드팩(CurseForge 등) 배포 환경에서 agent-runtime 실행 실패 수정.
