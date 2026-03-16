@@ -47,8 +47,7 @@ public class RuntimeManager {
         }
 
         Path runtimePath = FMLPaths.GAMEDIR.get().resolve("../agent-runtime").normalize();
-        String osName = System.getProperty("os.name", "").toLowerCase();
-        String nodeCmd = osName.contains("win") ? "node.exe" : "node";
+        String nodeCmd = resolveNodeCommand();
 
         Thread runtimeThread = new Thread(() -> {
             try {
@@ -154,6 +153,39 @@ public class RuntimeManager {
             };
         } catch (Exception ignored) {
         }
+    }
+
+    static String resolveNodeCommand() {
+        String osName = System.getProperty("os.name", "").toLowerCase();
+        boolean isWindows = osName.contains("win");
+        String cmd = isWindows ? "node.exe" : "node";
+
+        // Try PATH first
+        try {
+            Process test = new ProcessBuilder(cmd, "--version")
+                .redirectErrorStream(true).start();
+            int exit = test.waitFor();
+            if (exit == 0) return cmd;
+        } catch (Exception ignored) {}
+
+        // Windows: check common install locations
+        if (isWindows) {
+            String[] candidates = {
+                System.getenv("ProgramFiles") + "\\nodejs\\node.exe",
+                System.getenv("LOCALAPPDATA") + "\\fnm_multishells\\node.exe",
+                System.getProperty("user.home") + "\\.nvm\\current\\node.exe",
+                System.getenv("ProgramFiles") + " (x86)\\nodejs\\node.exe"
+            };
+            for (String path : candidates) {
+                if (path != null && new java.io.File(path).isFile()) {
+                    LOGGER.info("Found node at: {}", path);
+                    return path;
+                }
+            }
+        }
+
+        LOGGER.warn("Could not resolve node path, falling back to '{}'", cmd);
+        return cmd;
     }
 
     public void stop(String agentName) {

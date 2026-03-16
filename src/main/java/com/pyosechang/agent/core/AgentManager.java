@@ -7,6 +7,9 @@ import com.pyosechang.agent.event.AgentEvent;
 import com.pyosechang.agent.event.EventBus;
 import com.pyosechang.agent.event.EventType;
 import net.minecraft.core.BlockPos;
+import net.minecraft.nbt.CompoundTag;
+import net.minecraft.nbt.ListTag;
+import net.minecraft.nbt.TagParser;
 import net.minecraft.network.protocol.game.ClientboundAddPlayerPacket;
 import net.minecraft.network.protocol.game.ClientboundPlayerInfoRemovePacket;
 import net.minecraft.network.protocol.game.ClientboundPlayerInfoUpdatePacket;
@@ -15,11 +18,17 @@ import net.minecraft.network.protocol.game.ClientboundSetEntityDataPacket;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.item.ItemStack;
 import org.slf4j.Logger;
 
 import net.minecraftforge.fml.loading.FMLPaths;
 
+import java.io.IOException;
+import java.io.Writer;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.util.Collection;
 import java.util.EnumSet;
 import java.util.List;
@@ -66,6 +75,8 @@ public class AgentManager {
             persona = PersonaConfig.defaultPersona(name);
             LOGGER.info("No PERSONA.md for '{}', using defaults", name);
         }
+
+        loadInventory(name, agentPlayer);
 
         AgentContext ctx = new AgentContext(name, agentPlayer, persona);
         agents.put(name, ctx);
@@ -125,6 +136,8 @@ public class AgentManager {
             }
         }
 
+        saveInventory(name, agentPlayer);
+
         agentPlayer.discard();
 
         LOGGER.info("Agent '{}' despawned", name);
@@ -169,4 +182,55 @@ public class AgentManager {
     public Set<String> getAgentNames() { return agents.keySet(); }
     public boolean isSpawned(String name) { return agents.containsKey(name); }
     public int getAgentCount() { return agents.size(); }
+
+    // --- Inventory persistence ---
+
+    private Path getInventoryPath(String name) {
+        return FMLPaths.GAMEDIR.get().resolve(".agent/agents/" + name + "/inventory.dat");
+    }
+
+    private void saveInventory(String name, ServerPlayer agent) {
+        try {
+            ListTag items = new ListTag();
+            for (int i = 0; i < agent.getInventory().getContainerSize(); i++) {
+                ItemStack stack = agent.getInventory().getItem(i);
+                if (!stack.isEmpty()) {
+                    CompoundTag tag = new CompoundTag();
+                    tag.putInt("Slot", i);
+                    stack.save(tag);
+                    items.add(tag);
+                }
+            }
+            CompoundTag root = new CompoundTag();
+            root.put("Items", items);
+
+            Path path = getInventoryPath(name);
+            Files.createDirectories(path.getParent());
+            Path tmp = path.resolveSibling(path.getFileName() + ".tmp");
+            net.minecraft.nbt.NbtIo.writeCompressed(root, tmp.toFile());
+            Files.move(tmp, path, StandardCopyOption.REPLACE_EXISTING);
+
+            LOGGER.info("Saved inventory for '{}' ({} stacks)", name, items.size());
+        } catch (IOException e) {
+            LOGGER.error("Failed to save inventory for '{}'", name, e);
+        }
+    }
+
+    private void loadInventory(String name, ServerPlayer agent) {
+        Path path = getInventoryPath(name);
+        if (!Files.exists(path)) return;
+        try {
+            CompoundTag root = net.minecraft.nbt.NbtIo.readCompressed(path.toFile());
+            ListTag items = root.getList("Items", 10); // 10 = CompoundTag type
+            for (int i = 0; i < items.size(); i++) {
+                CompoundTag tag = items.getCompound(i);
+                int slot = tag.getInt("Slot");
+                ItemStack stack = ItemStack.of(tag);
+                agent.getInventory().setItem(slot, stack);
+            }
+            LOGGER.info("Loaded inventory for '{}' ({} stacks)", name, items.size());
+        } catch (IOException e) {
+            LOGGER.error("Failed to load inventory for '{}'", name, e);
+        }
+    }
 }

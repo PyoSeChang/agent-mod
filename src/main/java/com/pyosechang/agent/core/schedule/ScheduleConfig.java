@@ -117,7 +117,16 @@ public class ScheduleConfig {
 
     public static ScheduleConfig fromJson(JsonObject obj) {
         ScheduleConfig config = new ScheduleConfig();
-        config.type = Type.valueOf(obj.get("type").getAsString());
+        if (!obj.has("type") || obj.get("type").isJsonNull()) {
+            throw new IllegalArgumentException("ScheduleConfig requires 'type' field");
+        }
+        try {
+            config.type = Type.valueOf(obj.get("type").getAsString().toUpperCase());
+        } catch (IllegalArgumentException e) {
+            throw new IllegalArgumentException(
+                "Invalid schedule type: '" + obj.get("type").getAsString()
+                + "'. Valid types: TIME_OF_DAY, INTERVAL, OBSERVER");
+        }
         config.targetAgent = obj.has("target_agent") ? obj.get("target_agent").getAsString() : "";
         config.enabled = !obj.has("enabled") || obj.get("enabled").getAsBoolean();
         config.registeredTick = obj.has("registered_tick") ? obj.get("registered_tick").getAsLong() : 0;
@@ -130,7 +139,8 @@ public class ScheduleConfig {
                 config.repeatDays = obj.has("repeat_days") ? obj.get("repeat_days").getAsInt() : 1;
             }
             case INTERVAL -> {
-                config.intervalTicks = obj.has("interval_ticks") ? obj.get("interval_ticks").getAsInt() : 1200;
+                int rawInterval = obj.has("interval_ticks") ? obj.get("interval_ticks").getAsInt() : 1200;
+                config.intervalTicks = rawInterval > 0 ? rawInterval : 1200;
                 config.repeat = !obj.has("repeat") || obj.get("repeat").getAsBoolean();
             }
             case OBSERVER -> {

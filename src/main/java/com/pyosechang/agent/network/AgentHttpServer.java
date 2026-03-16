@@ -697,30 +697,16 @@ public class AgentHttpServer {
         if (!assertMethod(exchange, "POST")) return;
         try {
             JsonObject body = readBody(exchange);
-            String title = body.get("title").getAsString();
-            String description = body.has("description") ? body.get("description").getAsString() : "";
-            String content = body.has("content") ? body.get("content").getAsString() : "";
-            String category = body.has("category") ? body.get("category").getAsString() : "event";
 
-            MemoryLocation location = null;
-            if (body.has("location") && body.get("location").isJsonObject()) {
-                location = new Gson().fromJson(body.getAsJsonObject("location"), MemoryLocation.class);
+            // Auto-scope: if body doesn't specify visibleTo, default to this agent
+            if (!body.has("visibleTo") && !body.has("visible_to")) {
+                JsonArray vt = new JsonArray();
+                vt.add(agentName);
+                body.add("visibleTo", vt);
             }
 
-            // Auto-scope: if body specifies scope/visible_to, respect it; otherwise default to agent
-            List<String> visibleTo = null;
-            if (body.has("visible_to") && body.get("visible_to").isJsonArray()) {
-                visibleTo = new ArrayList<>();
-                for (JsonElement el : body.getAsJsonArray("visible_to")) {
-                    visibleTo.add(el.getAsString());
-                }
-            } else {
-                // No explicit visible_to — auto-assign to this agent
-                visibleTo = List.of(agentName);
-            }
-
-            MemoryEntry entry = MemoryManager.getInstance().create(
-                title, description, content, category, location, visibleTo);
+            // Delegate to createFromJson — handles category dispatch, location deserialization
+            MemoryEntry entry = MemoryManager.getInstance().createFromJson(body);
 
             JsonObject result = new JsonObject();
             result.addProperty("ok", true);

@@ -46,6 +46,9 @@ public class ObserverDef {
 
     public static ObserverDef fromJson(JsonObject obj) {
         ObserverDef def = new ObserverDef();
+        if (!obj.has("x") || !obj.has("y") || !obj.has("z")) {
+            throw new IllegalArgumentException("ObserverDef requires x, y, z coordinates");
+        }
         def.x = obj.get("x").getAsInt();
         def.y = obj.get("y").getAsInt();
         def.z = obj.get("z").getAsInt();

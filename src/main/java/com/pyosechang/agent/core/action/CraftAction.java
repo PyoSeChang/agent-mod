@@ -101,7 +101,9 @@ public class CraftAction implements Action {
 
             // Give output
             ItemStack resultStack = output.copy();
-            agent.getInventory().add(resultStack);
+            if (!agent.getInventory().add(resultStack)) {
+                agent.drop(resultStack, false);
+            }
             crafted++;
         }
 

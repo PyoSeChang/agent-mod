@@ -58,8 +58,7 @@ public class ManagerRuntimeManager {
         }
 
         Path runtimePath = FMLPaths.GAMEDIR.get().resolve("../agent-runtime").normalize();
-        String osName = System.getProperty("os.name", "").toLowerCase();
-        String nodeCmd = osName.contains("win") ? "node.exe" : "node";
+        String nodeCmd = RuntimeManager.resolveNodeCommand();
 
         Thread runtimeThread = new Thread(() -> {
             try {

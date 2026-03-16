@@ -1,5 +1,44 @@
 # CHANGELOG
 
+## v0.6.0 — 2026-03-16 `[event, infra, brain]`
+
+EventBus 시스템 + Go Bubbletea 기반 Agent TUI. 마인크래프트 밖에서 에이전트와 실시간 대화/제어 가능. 인게임 채팅은 에이전트 응답(CHAT)만 표시하도록 정리.
+
+### 변경 사항
+
+**`event`** (신규 컴포넌트)
+- `EventType` enum: 17개 이벤트 (THOUGHT, TOOL_CALL, CHAT, TEXT, ERROR, lifecycle, schedule, action)
+- `AgentEvent` record: timestamp, agentName, type, data + SSE/JSON 직렬화
+- `EventBus` 싱글턴: pub/sub + 2000개 링 버퍼 히스토리
+- `ChatSubscriber`: 인게임 채팅 — CHAT, TEXT(Done), ERROR, SPAWNED/DESPAWNED만 표시
+- `SSESubscriber`: TUI용 SSE 스트림 + 15초 heartbeat
+- `LogSubscriber`: JSONL 액션 로깅
+
+**`infra`**
+- 이벤트 생산자: RuntimeManager, ManagerRuntimeManager, AgentManager, ActiveActionManager, ScheduleManager, ObserverManager, AgentCommand에 EventBus.publish() 추가
+- 신규 HTTP 엔드포인트: GET /events/stream (SSE), GET /events/history, GET /session/info, POST /manager/tell, POST /agent/{name}/stop
+- spawn/despawn 라우팅 수정 (ctx null 체크 전으로 이동)
+- spawn 기본 좌표: 플레이어 근처로 변경
+- HttpServer executor → newCachedThreadPool (SSE 장기 연결 지원)
+- monitor 패키지 정리: ChatMonitor, MonitorLogBuffer, TerminalIntegration 삭제
+
+**`brain`**
+- agent-runtime: thinking block → THOUGHT, text block → CHAT 구분
+- 인게임 채팅에서 THOUGHT, TOOL_CALL 제거 (에이전트 응답만 표시)
+
+**`agent-tui`** (신규 — Go Bubbletea)
+- 분할 패널: 에이전트 목록 (좌) + 대화 뷰 (우)
+- SSE 실시간 스트리밍 + 히스토리 catch-up
+- tell, spawn, despawn, stop HTTP 명령
+- Ctrl+O: verbose 토글 (thinking/internal 이벤트 표시/숨김)
+- ESC: 에이전트 런타임 중지
+- Tab: 패널 전환
+- Claude Code 스타일 미니멀 포맷팅
+- 붙여넣기 보호 (bracketed paste — 줄바꿈을 공백으로 치환)
+- 단일 바이너리 (`go build`)
+
+---
+
 ## v0.5.2 — 2026-03-15 `[multi-agent, infra]`
 
 클라이언트 GUI 다국어(i18n) 지원. 한국어(ko_kr), 영어(en_us) lang 파일 추가. MCP 도구 목록에 사람이 읽기 좋은 번역 이름 + 호버 설명 툴팁 추가.
