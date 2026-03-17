@@ -52,38 +52,136 @@ public class AgentManager {
     public MinecraftServer getServer() { return server; }
 
     /**
-     * @param pos spawn position. If null and config has bed, uses bed position.
+     * Spawn (activate) agent. If dormant, wakes up. Otherwise creates new entity.
+     * Position: bed → nearby player → world spawn.
      */
-    public boolean spawn(String name, ServerLevel level, BlockPos pos) {
-        if (agents.containsKey(name)) return false;
+    public boolean spawn(String name, ServerLevel level) {
+        // If dormant, wake up instead of creating new entity
+        AgentContext existing = agents.get(name);
+        if (existing != null && existing.isDormant()) {
+            return wakeUp(existing);
+        }
+        if (existing != null) return false; // already active
 
-        // Load config for gamemode / bed
         AgentConfig config = AgentConfig.load(name);
 
-        // If no explicit position and bed is set, use bed position
+        // Position resolution
+        BlockPos pos;
         boolean spawnFromBed = false;
-        if (pos == null && config.hasBed()) {
+        if (config.hasBed()) {
             pos = new BlockPos(config.getBedX(), config.getBedY(), config.getBedZ());
             spawnFromBed = true;
-        }
-        if (pos == null) {
-            // Fallback to world spawn
+        } else if (server != null && !server.getPlayerList().getPlayers().isEmpty()) {
+            ServerPlayer nearPlayer = server.getPlayerList().getPlayers().get(0);
+            pos = nearPlayer.blockPosition().offset(2, 0, 0);
+        } else {
             pos = level.getSharedSpawnPos();
         }
 
+        AgentContext ctx = createAgentEntity(name, level, pos, config);
+        agents.put(name, ctx);
+        sendSpawnPackets(ctx.getPlayer());
+
+        LOGGER.info("Agent '{}' spawned at {} {} {} (gamemode={})", name,
+            pos.getX(), pos.getY(), pos.getZ(), config.getGamemode());
+
+        // Bed spawn: appear sleeping, wake up after 1 tick
+        if (spawnFromBed) {
+            AgentPlayer ap = (AgentPlayer) ctx.getPlayer();
+            ap.setPose(Pose.SLEEPING);
+            broadcastEntityData(ap);
+            server.tell(new TickTask(server.getTickCount() + 1, () -> {
+                ap.setPose(Pose.STANDING);
+                broadcastEntityData(ap);
+            }));
+        }
+
+        JsonObject data = new JsonObject();
+        data.addProperty("x", pos.getX());
+        data.addProperty("y", pos.getY());
+        data.addProperty("z", pos.getZ());
+        EventBus.getInstance().publish(AgentEvent.of(name, EventType.SPAWNED, data));
+        return true;
+    }
+
+    /**
+     * Spawn a dormant (sleeping) agent at bed position.
+     * Called on server start for agents with beds.
+     */
+    public void spawnDormant(String name, ServerLevel level) {
+        if (agents.containsKey(name)) return;
+        AgentConfig config = AgentConfig.load(name);
+        if (!config.hasBed()) return;
+
+        BlockPos pos = new BlockPos(config.getBedX(), config.getBedY(), config.getBedZ());
+        AgentContext ctx = createAgentEntity(name, level, pos, config);
+        ctx.setDormant(true);
+        agents.put(name, ctx);
+
+        sleepInBed(ctx.getPlayer(), pos);
+        sendSpawnPackets(ctx.getPlayer());
+        LOGGER.info("Agent '{}' dormant at bed {} {} {}", name, pos.getX(), pos.getY(), pos.getZ());
+    }
+
+    /**
+     * Wake a dormant agent — find stand-up position next to bed, resume ticking.
+     * Replicates vanilla LivingEntity.stopSleeping() logic since our override is no-op.
+     */
+    private boolean wakeUp(AgentContext ctx) {
+        ctx.setDormant(false);
+        ServerPlayer ap = ctx.getPlayer();
+
+        // Find stand-up position (vanilla wake-up logic)
+        ap.getSleepingPos().ifPresent(bedPos -> {
+            if (ap.level() instanceof ServerLevel level) {
+                net.minecraft.world.level.block.state.BlockState bedState = level.getBlockState(bedPos);
+                if (bedState.getBlock() instanceof net.minecraft.world.level.block.BedBlock) {
+                    // Set bed to unoccupied
+                    level.setBlock(bedPos, bedState.setValue(
+                        net.minecraft.world.level.block.BedBlock.OCCUPIED, false), 3);
+
+                    // Find valid stand-up position next to bed
+                    net.minecraft.core.Direction facing = bedState.getValue(
+                        net.minecraft.world.level.block.BedBlock.FACING);
+                    java.util.Optional<net.minecraft.world.phys.Vec3> standUp =
+                        net.minecraft.world.level.block.BedBlock.findStandUpPosition(
+                            net.minecraft.world.entity.EntityType.PLAYER, level, bedPos, facing, ap.getYRot());
+
+                    if (standUp.isPresent()) {
+                        net.minecraft.world.phys.Vec3 pos = standUp.get();
+                        ap.setPos(pos.x, pos.y, pos.z);
+                    } else {
+                        // Fallback: on top of bed block
+                        ap.setPos(bedPos.getX() + 0.5, bedPos.getY() + 0.6, bedPos.getZ() + 0.5);
+                    }
+                }
+            }
+        });
+
+        // Clear sleeping state
+        ap.clearSleepingPos();
+        ap.setPose(Pose.STANDING);
+        broadcastEntityData(ap);
+        AgentAnimation.broadcast(
+            new net.minecraft.network.protocol.game.ClientboundTeleportEntityPacket(ap));
+        LOGGER.info("Agent '{}' woke up from bed", ctx.getName());
+        EventBus.getInstance().publish(AgentEvent.of(ctx.getName(), EventType.SPAWNED));
+        return true;
+    }
+
+    /**
+     * Create agent entity + context (shared by spawn and spawnDormant).
+     */
+    private AgentContext createAgentEntity(String name, ServerLevel level, BlockPos pos, AgentConfig config) {
         GameProfile profile = new GameProfile(
             UUID.nameUUIDFromBytes(("Agent_" + name).getBytes()), "[" + name + "]");
 
-        // Create AgentPlayer (ServerPlayer subclass)
         AgentPlayer agentPlayer = new AgentPlayer(server, level, profile);
         agentPlayer.setConfig(config);
-
-        // Set up mock network handler (sets agentPlayer.connection)
         new AgentNetHandler(server, agentPlayer);
-
         agentPlayer.setPos(pos.getX() + 0.5, pos.getY(), pos.getZ() + 0.5);
 
-        // Apply gamemode from config
+        // Apply gamemode
         switch (config.getGamemode()) {
             case CREATIVE -> {
                 agentPlayer.setInvulnerable(true);
@@ -97,99 +195,64 @@ public class AgentManager {
             }
         }
 
-        // Load persona from .agent/agents/{name}/PERSONA.md
         Path personaFile = FMLPaths.GAMEDIR.get().resolve(".agent/agents/" + name + "/PERSONA.md");
-        PersonaConfig persona;
-        if (personaFile.toFile().exists()) {
-            persona = PersonaConfig.parse(name, personaFile);
-            LOGGER.info("Loaded persona for '{}': role={}, tools={}", name, persona.getRole(),
-                persona.isAllToolsAllowed() ? "all" : persona.getToolsCsv());
-        } else {
-            persona = PersonaConfig.defaultPersona(name);
-            LOGGER.info("No PERSONA.md for '{}', using defaults", name);
-        }
+        PersonaConfig persona = personaFile.toFile().exists()
+            ? PersonaConfig.parse(name, personaFile)
+            : PersonaConfig.defaultPersona(name);
 
         loadInventory(name, agentPlayer);
+        level.addNewPlayer(agentPlayer);
 
-        AgentContext ctx = new AgentContext(name, agentPlayer, persona);
-        agents.put(name, ctx);
+        return new AgentContext(name, agentPlayer, persona);
+    }
 
-        // 1) PlayerInfo FIRST — client ignores spawn packets for unknown players
+    private void sendSpawnPackets(ServerPlayer agentPlayer) {
         ClientboundPlayerInfoUpdatePacket infoPacket =
             new ClientboundPlayerInfoUpdatePacket(
                 EnumSet.of(ClientboundPlayerInfoUpdatePacket.Action.ADD_PLAYER),
                 List.of(agentPlayer));
-        for (ServerPlayer player : server.getPlayerList().getPlayers()) {
-            player.connection.send(infoPacket);
-        }
-
-        // 2) Register entity in world — entity tracker may send spawn packets
-        level.addNewPlayer(agentPlayer);
-
-        // 3) Explicit spawn + data packets (in case tracker didn't cover all players)
         ClientboundAddPlayerPacket spawnPacket = new ClientboundAddPlayerPacket(agentPlayer);
         ClientboundSetEntityDataPacket dataPacket =
             new ClientboundSetEntityDataPacket(agentPlayer.getId(),
                 agentPlayer.getEntityData().getNonDefaultValues());
 
         for (ServerPlayer player : server.getPlayerList().getPlayers()) {
+            player.connection.send(infoPacket);
             player.connection.send(spawnPacket);
             if (dataPacket.packedItems() != null) {
                 player.connection.send(dataPacket);
             }
         }
-
-        LOGGER.info("Agent '{}' spawned at {} {} {} (gamemode={})", name,
-            pos.getX(), pos.getY(), pos.getZ(), config.getGamemode());
-
-        // Bed spawn animation: appear sleeping, wake up after 1 tick
-        if (spawnFromBed) {
-            agentPlayer.setPose(Pose.SLEEPING);
-            broadcastEntityData(agentPlayer);
-            server.tell(new TickTask(server.getTickCount() + 1, () -> {
-                agentPlayer.setPose(Pose.STANDING);
-                broadcastEntityData(agentPlayer);
-            }));
-        }
-
-        JsonObject data = new JsonObject();
-        data.addProperty("x", pos.getX());
-        data.addProperty("y", pos.getY());
-        data.addProperty("z", pos.getZ());
-        EventBus.getInstance().publish(AgentEvent.of(name, EventType.SPAWNED, data));
-
-        return true;
     }
 
+    /**
+     * Despawn agent. If bed is set, go dormant (sleep in bed, entity stays).
+     * If no bed, remove entity entirely.
+     */
     public boolean despawn(String name) {
-        AgentContext ctx = agents.remove(name);
-        if (ctx == null) return false;
+        AgentContext ctx = agents.get(name);
+        if (ctx == null || ctx.isDormant()) return false;
 
-        ServerPlayer agentPlayer = ctx.getPlayer();
+        saveInventory(name, ctx.getPlayer());
+
         AgentConfig config = ctx.getConfig();
-
-        saveInventory(name, agentPlayer);
-
-        // Bed despawn animation: teleport to bed, sleep, then remove after 1 tick
         if (config.hasBed()) {
-            agentPlayer.teleportTo(config.getBedX() + 0.5, config.getBedY(), config.getBedZ() + 0.5);
-            agentPlayer.setPose(Pose.SLEEPING);
-            broadcastEntityData(agentPlayer);
-            AgentAnimation.broadcast(new net.minecraft.network.protocol.game.ClientboundTeleportEntityPacket(agentPlayer));
-
-            // Delay removal by 1 tick so clients see the sleeping pose
-            server.tell(new TickTask(server.getTickCount() + 1, () -> {
-                removeAgentFromClients(agentPlayer);
-                agentPlayer.discard();
-            }));
+            // Go dormant: teleport to bed, sleep in bed, keep entity
+            BlockPos bedPos = new BlockPos(config.getBedX(), config.getBedY(), config.getBedZ());
+            ServerPlayer ap = ctx.getPlayer();
+            ap.teleportTo(bedPos.getX() + 0.5, bedPos.getY(), bedPos.getZ() + 0.5);
+            AgentAnimation.broadcast(new net.minecraft.network.protocol.game.ClientboundTeleportEntityPacket(ap));
+            sleepInBed(ap, bedPos);
+            ctx.setDormant(true);
         } else {
-            removeAgentFromClients(agentPlayer);
-            agentPlayer.discard();
+            // No bed: remove entirely
+            agents.remove(name);
+            removeAgentFromClients(ctx.getPlayer());
+            ctx.getPlayer().discard();
         }
 
-        LOGGER.info("Agent '{}' despawned", name);
+        LOGGER.info("Agent '{}' despawned (dormant={})", name, config.hasBed());
         EventBus.getInstance().publish(AgentEvent.of(name, EventType.DESPAWNED));
-
         return true;
     }
 
@@ -207,6 +270,27 @@ public class AgentManager {
         }
     }
 
+    /**
+     * Put agent to sleep in a bed using vanilla startSleeping().
+     * Vanilla sleeps at the HEAD block, not the FOOT.
+     * Config stores FOOT position; we calculate HEAD = FOOT + facing direction.
+     */
+    private void sleepInBed(ServerPlayer agent, BlockPos footPos) {
+        if (!(agent.level() instanceof ServerLevel level)) return;
+        net.minecraft.world.level.block.state.BlockState footState = level.getBlockState(footPos);
+        if (footState.getBlock() instanceof net.minecraft.world.level.block.BedBlock
+                && footState.hasProperty(net.minecraft.world.level.block.BedBlock.FACING)) {
+            net.minecraft.core.Direction facing = footState.getValue(
+                net.minecraft.world.level.block.BedBlock.FACING);
+            BlockPos headPos = footPos.relative(facing);
+            agent.startSleeping(headPos);
+        } else {
+            // Fallback: use footPos directly
+            agent.startSleeping(footPos);
+        }
+        broadcastEntityData(agent);
+    }
+
     private void broadcastEntityData(ServerPlayer agentPlayer) {
         var nonDefaults = agentPlayer.getEntityData().getNonDefaultValues();
         if (nonDefaults != null) {
@@ -218,9 +302,14 @@ public class AgentManager {
         }
     }
 
+    /** Remove all agents from world (server shutdown). */
     public void despawnAll() {
         for (String name : Set.copyOf(agents.keySet())) {
-            despawn(name);
+            AgentContext ctx = agents.remove(name);
+            if (ctx != null) {
+                saveInventory(name, ctx.getPlayer());
+                ctx.getPlayer().discard();
+            }
         }
     }
 
@@ -252,7 +341,23 @@ public class AgentManager {
     public AgentContext getAgent(String name) { return agents.get(name); }
     public Collection<AgentContext> getAllAgents() { return agents.values(); }
     public Set<String> getAgentNames() { return agents.keySet(); }
-    public boolean isSpawned(String name) { return agents.containsKey(name); }
+    /** Active (not dormant) */
+    public boolean isSpawned(String name) {
+        AgentContext ctx = agents.get(name);
+        return ctx != null && !ctx.isDormant();
+    }
+    public boolean isDormant(String name) {
+        AgentContext ctx = agents.get(name);
+        return ctx != null && ctx.isDormant();
+    }
+    /** Remove a dormant agent from the map (bed was broken). */
+    public void removeDormant(String name) {
+        AgentContext ctx = agents.get(name);
+        if (ctx != null && ctx.isDormant()) {
+            agents.remove(name);
+            removeAgentFromClients(ctx.getPlayer());
+        }
+    }
     public int getAgentCount() { return agents.size(); }
 
     // --- Inventory persistence ---

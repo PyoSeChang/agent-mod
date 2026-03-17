@@ -120,8 +120,10 @@
   "gui.agent.config.hardcore_warning": "사망 시 에이전트가 영구 삭제됩니다!",
   "gui.agent.config.bed": "침대 위치",
   "gui.agent.config.bed_none": "설정 안 됨",
-  "gui.agent.config.set_bed": "침대 설정",
+  "gui.agent.config.give_bed": "침대 지급",
   "gui.agent.config.reset_bed": "초기화",
   "gui.agent.config.apply": "적용",
-  "gui.agent.config.saved": "설정 저장됨!"
+  "gui.agent.config.saved": "설정 저장됨!",
+  "gui.agent.config.bed_given": "침대 아이템이 인벤토리에 추가됨!",
+  "gui.agent.config.bed_removed": "침대 위치가 초기화됨."
 }

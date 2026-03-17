@@ -1,5 +1,83 @@
 # CHANGELOG
 
+## v0.8.0 — 2026-03-17 `[multi-agent, body, memory, event, infra]`
+
+에이전트별 Config 시스템 추가. 게임모드(서바이벌/크리에이티브/하드코어), 침대 스폰을 G키 CONFIG 탭에서 설정. 하드코어 사망 시 에이전트+전용 메모리 영구 삭제. Despawn 시 침대 눕기, Spawn 시 침대에서 일어나기 애니메이션.
+
+### 변경 사항
+
+**`multi-agent`**
+- `AgentConfig.java` 신규: 에이전트별 게임 메카닉 설정 (config.json 영속화)
+  - Gamemode enum: SURVIVAL, CREATIVE, HARDCORE
+  - Bed 위치: x, y, z, dimension (null = 미설정)
+  - toJson/fromJson: HTTP 전송용 JSON 변환
+- `AgentContext`: AgentConfig 필드 추가, 생성자에서 자동 로드
+- `AgentManagementScreen`: CONFIG 탭 추가 (세 번째 탭, 키보드 3)
+  - 게임모드 라디오 버튼: Survival(초록), Creative(금색), Hardcore(빨강)
+  - 침대 위치: Set Bed(플레이어 현재 위치)/Reset Bed 버튼
+  - Creative/Hardcore 경고 텍스트 표시
+  - Apply 버튼 → /agent/{name}/config POST
+- 탭 바: [Management] [Monitor] [Config] 3탭 구조
+
+**`body`**
+- `AgentPlayer`: 게임모드 연동
+  - `isInvulnerableTo()`: CREATIVE만 무적 (기존 무조건 true → 동적)
+  - `die()`: SURVIVAL=리스폰, HARDCORE=영구삭제 플래그, CREATIVE=무시
+  - `tick()`: CREATIVE 시 foodData.tick() 스킵
+  - `scheduleRespawn()`: 1틱 지연 후 체력/배고픔 리셋 → 침대 or 월드 스폰 텔레포트
+- `AgentManager.spawn()`: config.gamemode 기반 GameType/invulnerable 설정
+  - CREATIVE: abilities.mayfly=true, GameType.CREATIVE
+  - 침대 스폰: 명시적 좌표 없으면 침대 좌표 사용 + SLEEPING 포즈 → 1틱 후 STANDING
+- `AgentManager.despawn()`: 침대 있으면 텔레포트 + SLEEPING 포즈 → 1틱 후 entity 제거
+- `AgentTickHandler`: 하드코어 사망 감지 → RuntimeManager.stop + despawn + 디렉토리 삭제
+
+**`memory`**
+- `MemoryManager.deleteAgentMemories(agentName)`: visibleTo에 해당 에이전트만 있는 엔트리 일괄 삭제 (하드코어 사망 시 호출)
+
+**`event`**
+- `EventType`: AGENT_DIED, AGENT_DELETED 추가 (17→19)
+
+**`infra`**
+- `AgentHttpServer`: `/agent/{name}/config` GET/POST 엔드포인트
+  - GET: 현재 config 반환
+  - POST: gamemode/bed 부분 업데이트, CREATIVE 제한 검증 (요청자 플레이어 GameType 확인)
+- `/agents/list` 응답에 gamemode, has_bed 필드 추가
+- i18n: en_us.json, ko_kr.json에 config 관련 14개 키 추가
+- agent-runtime 배포 경로를 `~/.agent-mod/agent-runtime/`으로 변경 (인스턴스별 복사 → 사용자 폴더 공유)
+  - `RuntimeManager.resolveRuntimePath()`: dev/prod 환경 분리 (`FMLLoader.isProduction()`)
+    - prod: `~/.agent-mod/agent-runtime` 전용, 없으면 deploy 안내 에러
+    - dev: `GAMEDIR/../agent-runtime` 전용, 없으면 빌드 안내 에러
+  - `ManagerRuntimeManager`: 경로 해석을 `RuntimeManager.resolveRuntimePath()`로 통합 (중복 제거)
+  - `deploy.js`: runtime을 `%USERPROFILE%/.agent-mod/agent-runtime/`에 배포, 인스턴스 내 레거시 폴더 자동 삭제
+  - `RuntimeManagerTest`: dev/prod 경로 해석 7개 TC 추가
+
+### 설계 판단
+
+- **Config ↔ Persona 분리**: PersonaConfig(PERSONA.md)는 AI 행동(역할/성격/도구), AgentConfig(config.json)는 게임 메카닉(모드/침대). 관심사 분리로 독립 편집 가능.
+- **침대 = 좌표 설정**: 커스텀 블록/아이템 등록 없이 CONFIG 탭 Set Bed 버튼으로 플레이어 현재 좌표 저장. Forge 아이템 등록 복잡도 회피.
+- **하드코어 사망 → 틱 핸들러 처리**: die()에서 플래그만 설정, AgentTickHandler에서 파일 I/O(메모리 삭제, 디렉토리 삭제) 수행. 사망 이벤트 핸들러 내 heavy 작업 방지.
+- **Despawn 수면 연출**: 1틱 딜레이로 클라이언트가 SLEEPING 포즈를 렌더링한 후 entity 제거. 즉시 제거 시 애니메이션 안 보임.
+- **스킨 → 다음 버전**: GameProfile 텍스처 주입에 Mojang 서명 우회(클라이언트 사이드) 필요. 별도 feature branch에서 진행.
+
+### 파일 변경 요약
+
+| 파일 | 구분 | 컴포넌트 |
+|------|------|----------|
+| `core/AgentConfig.java` | 신규 | multi-agent |
+| `core/AgentContext.java` | 수정 | multi-agent |
+| `core/AgentPlayer.java` | 수정 | body |
+| `core/AgentManager.java` | 수정 | body |
+| `core/AgentTickHandler.java` | 수정 | body |
+| `core/memory/MemoryManager.java` | 수정 | memory |
+| `event/EventType.java` | 수정 | event |
+| `network/AgentHttpServer.java` | 수정 | infra |
+| `client/AgentManagementScreen.java` | 수정 | multi-agent |
+| `lang/en_us.json` | 수정 | infra |
+| `lang/ko_kr.json` | 수정 | infra |
+| `EventTypeTest.java` | 수정 | event |
+
+---
+
 ## v0.7.0 — 2026-03-16 `[multi-agent, event, infra]`
 
 AgentManagementScreen(G키)에 Monitor 페이지 추가. 인게임 네이티브 GUI로 에이전트 실시간 모니터링/제어. terminal-mod 편입 시도 철회 — jediterm/Bubbletea 호환성 문제로 Minecraft GUI 방식 채택.

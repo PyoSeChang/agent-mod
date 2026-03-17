@@ -120,8 +120,10 @@
   "gui.agent.config.hardcore_warning": "Death = permanent agent deletion!",
   "gui.agent.config.bed": "Bed Location",
   "gui.agent.config.bed_none": "Not set",
-  "gui.agent.config.set_bed": "Set Bed",
+  "gui.agent.config.give_bed": "Give Bed",
   "gui.agent.config.reset_bed": "Reset",
   "gui.agent.config.apply": "Apply",
-  "gui.agent.config.saved": "Config saved!"
+  "gui.agent.config.saved": "Config saved!",
+  "gui.agent.config.bed_given": "Bed item added to inventory!",
+  "gui.agent.config.bed_removed": "Bed location cleared."
 }

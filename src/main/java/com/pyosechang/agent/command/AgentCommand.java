@@ -119,18 +119,9 @@ public class AgentCommand {
 
     private static int spawn(CommandSourceStack source, String name) {
         ServerLevel level = source.getLevel();
-
-        BlockPos pos;
-        if (source.getEntity() != null) {
-            pos = source.getEntity().blockPosition().offset(2, 0, 0);
-        } else {
-            pos = BlockPos.containing(source.getPosition());
-        }
-
-        boolean ok = AgentManager.getInstance().spawn(name, level, pos);
+        boolean ok = AgentManager.getInstance().spawn(name, level);
         if (ok) {
-            source.sendSuccess(() -> Component.literal(
-                "[" + name + "] Spawned at " + pos.getX() + " " + pos.getY() + " " + pos.getZ()), false);
+            source.sendSuccess(() -> Component.literal("[" + name + "] Spawned"), false);
         } else {
             source.sendFailure(Component.literal("[" + name + "] Already spawned. Use /agent @" + name + " despawn first."));
         }

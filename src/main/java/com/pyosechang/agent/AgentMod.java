@@ -4,6 +4,7 @@ import com.mojang.logging.LogUtils;
 import com.pyosechang.agent.compat.CompatRegistry;
 import com.pyosechang.agent.compat.ae2.AE2Compat;
 import com.pyosechang.agent.compat.create.CreateCompat;
+import com.pyosechang.agent.core.AgentConfig;
 import com.pyosechang.agent.core.AgentLogger;
 import com.pyosechang.agent.core.AgentManager;
 import com.pyosechang.agent.core.action.*;
@@ -18,7 +19,9 @@ import com.pyosechang.agent.event.SSESubscriber;
 import com.pyosechang.agent.network.AgentHttpServer;
 import com.pyosechang.agent.runtime.ManagerRuntimeManager;
 import com.pyosechang.agent.runtime.RuntimeManager;
+import net.minecraft.server.MinecraftServer;
 import net.minecraftforge.common.MinecraftForge;
+import net.minecraftforge.fml.loading.FMLPaths;
 import net.minecraftforge.event.server.ServerStartingEvent;
 import net.minecraftforge.event.server.ServerStoppingEvent;
 import net.minecraftforge.event.server.ServerStoppedEvent;
@@ -99,6 +102,25 @@ public class AgentMod {
         httpServer.start();
         RuntimeManager.getInstance().setHttpServer(httpServer);
         ManagerRuntimeManager.getInstance().setHttpServer(httpServer);
+
+        // Spawn dormant agents (sleeping in bed) for all agents with bed config
+        spawnDormantAgents(event.getServer());
+    }
+
+    private void spawnDormantAgents(MinecraftServer server) {
+        java.nio.file.Path agentsDir = FMLPaths.GAMEDIR.get().resolve(".agent/agents");
+        if (!java.nio.file.Files.isDirectory(agentsDir)) return;
+        try (var dirs = java.nio.file.Files.list(agentsDir)) {
+            dirs.filter(java.nio.file.Files::isDirectory).forEach(dir -> {
+                String name = dir.getFileName().toString();
+                AgentConfig config = AgentConfig.load(name);
+                if (config.hasBed()) {
+                    AgentManager.getInstance().spawnDormant(name, server.overworld());
+                }
+            });
+        } catch (Exception e) {
+            LOGGER.error("Failed to spawn dormant agents", e);
+        }
     }
 
     @SubscribeEvent

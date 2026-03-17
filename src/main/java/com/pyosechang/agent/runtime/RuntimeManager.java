@@ -155,32 +155,41 @@ public class RuntimeManager {
         }
     }
 
-    /**
-     * Resolve agent-runtime path. Search order:
-     * 1. ~/.agent-mod/agent-runtime (deployed)
-     * 2. GAMEDIR/agent-runtime (legacy / in-instance)
-     * 3. GAMEDIR/../agent-runtime (dev: sibling to run/)
-     */
+    static boolean isProduction() {
+        try {
+            return net.minecraftforge.fml.loading.FMLLoader.isProduction();
+        } catch (Exception e) {
+            return true; // safe default
+        }
+    }
+
     static Path resolveRuntimePath() {
-        // 1. User home: ~/.agent-mod/agent-runtime
-        Path userHome = Path.of(System.getProperty("user.home"), ".agent-mod", "agent-runtime");
-        if (userHome.resolve("dist/index.js").toFile().isFile()) {
-            LOGGER.info("Using agent-runtime from user home: {}", userHome);
-            return userHome;
-        }
-
-        // 2. Game dir (legacy)
+        Path userHome = Path.of(System.getProperty("user.home"));
         Path gameDir = FMLPaths.GAMEDIR.get();
-        Path inGame = gameDir.resolve("agent-runtime");
-        if (inGame.toFile().isDirectory()) {
-            LOGGER.info("Using agent-runtime from game dir: {}", inGame);
-            return inGame;
-        }
+        return resolveRuntimePath(userHome, gameDir, isProduction());
+    }
 
-        // 3. Dev (sibling to run/)
-        Path dev = gameDir.resolve("../agent-runtime").normalize();
-        LOGGER.info("Using agent-runtime from dev path: {}", dev);
-        return dev;
+    static Path resolveRuntimePath(Path userHome, Path gameDir, boolean production) {
+        if (production) {
+            Path userRuntime = userHome.resolve(".agent-mod/agent-runtime");
+            if (userRuntime.resolve("dist/index.js").toFile().isFile()) {
+                LOGGER.info("Using agent-runtime from user home: {}", userRuntime);
+                return userRuntime;
+            }
+            throw new IllegalStateException(
+                "agent-runtime not found at " + userRuntime +
+                ". Run deploy script first: node scripts/deploy.js");
+        } else {
+            // Dev: GAMEDIR is run/, agent-runtime is sibling
+            Path dev = gameDir.resolve("../agent-runtime").normalize();
+            if (dev.resolve("dist/index.js").toFile().isFile()) {
+                LOGGER.info("Using agent-runtime from dev path: {}", dev);
+                return dev;
+            }
+            throw new IllegalStateException(
+                "agent-runtime not found at " + dev +
+                ". Run: cd agent-runtime && npm run build");
+        }
     }
 
     static String resolveNodeCommand() {

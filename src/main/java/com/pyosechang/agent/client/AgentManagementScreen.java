@@ -209,13 +209,14 @@ public class AgentManagementScreen extends Screen {
         int btnY = height - 26;
         int rightStart = LEFT_W + 20;
 
+        // Bed buttons positioned dynamically during render (same row as bed text)
         configSetBedBtn = addRenderableWidget(Button.builder(
-            Component.translatable("gui.agent.config.set_bed"), btn -> doSetBed())
-            .bounds(rightStart, btnY - 60, 100, 20).build());
+            Component.translatable("gui.agent.config.give_bed"), btn -> doGiveBed())
+            .bounds(rightStart, 0, 80, 16).build()); // Y set in render
 
         configResetBedBtn = addRenderableWidget(Button.builder(
             Component.translatable("gui.agent.config.reset_bed"), btn -> doResetBed())
-            .bounds(rightStart + 106, btnY - 60, 60, 20).build());
+            .bounds(rightStart + 86, 0, 50, 16).build()); // Y set in render
 
         configApplyBtn = addRenderableWidget(Button.builder(
             Component.translatable("gui.agent.config.apply"), btn -> doApplyConfig())
@@ -262,19 +263,33 @@ public class AgentManagementScreen extends Screen {
         });
     }
 
-    private void doSetBed() {
-        if (minecraft.player == null) return;
-        configHasBed = true;
-        configBedX = minecraft.player.blockPosition().getX();
-        configBedY = minecraft.player.blockPosition().getY();
-        configBedZ = minecraft.player.blockPosition().getZ();
-        configBedDimension = minecraft.player.level().dimension().location().toString();
-        updateConfigButtons();
+    private void doGiveBed() {
+        if (selectedAgentName == null || minecraft.player == null) return;
+        // Request server to give agent bed item to player
+        JsonObject body = new JsonObject();
+        body.addProperty("agent", selectedAgentName);
+        body.addProperty("player", minecraft.player.getName().getString());
+        BridgeClient.post("/agent/" + selectedAgentName + "/give-bed", body).thenAccept(result -> {
+            Minecraft.getInstance().tell(() -> {
+                configStatus = result.has("ok") && result.get("ok").getAsBoolean()
+                    ? I18n.get("gui.agent.config.bed_given")
+                    : (result.has("error") ? result.get("error").getAsString() : "Error");
+            });
+        });
     }
 
     private void doResetBed() {
-        configHasBed = false;
-        updateConfigButtons();
+        if (selectedAgentName == null) return;
+        JsonObject body = new JsonObject();
+        body.addProperty("gamemode", GAMEMODE_NAMES[configSelectedGamemode]);
+        body.add("bed", com.google.gson.JsonNull.INSTANCE);
+        BridgeClient.post("/agent/" + selectedAgentName + "/config", body).thenAccept(result -> {
+            Minecraft.getInstance().tell(() -> {
+                configHasBed = false;
+                configStatus = I18n.get("gui.agent.config.bed_removed");
+                updateConfigButtons();
+            });
+        });
     }
 
     private void doApplyConfig() {
@@ -284,16 +299,7 @@ public class AgentManagementScreen extends Screen {
         if (minecraft.player != null) {
             body.addProperty("player", minecraft.player.getName().getString());
         }
-        if (configHasBed) {
-            JsonObject bed = new JsonObject();
-            bed.addProperty("x", configBedX);
-            bed.addProperty("y", configBedY);
-            bed.addProperty("z", configBedZ);
-            bed.addProperty("dimension", configBedDimension);
-            body.add("bed", bed);
-        } else {
-            body.add("bed", com.google.gson.JsonNull.INSTANCE);
-        }
+        // Bed is managed by give-bed / reset-bed, not by apply — only send gamemode
         BridgeClient.post("/agent/" + selectedAgentName + "/config", body).thenAccept(result -> {
             Minecraft.getInstance().tell(() -> {
                 if (result.has("ok") && result.get("ok").getAsBoolean()) {
@@ -407,9 +413,9 @@ public class AgentManagementScreen extends Screen {
         // Sync monitor state if available
         syncMonitorSelection();
 
-        // Load config when on Config page
+        // Always load config (needed for bed-aware spawn on all pages)
+        loadConfig();
         if (currentPage == Page.CONFIG) {
-            loadConfig();
             updateConfigButtons();
         }
 
@@ -546,9 +552,7 @@ public class AgentManagementScreen extends Screen {
         if (selectedAgentName == null || selectedSpawned || minecraft.player == null) return;
         JsonObject body = new JsonObject();
         body.addProperty("name", selectedAgentName);
-        body.addProperty("x", minecraft.player.blockPosition().getX());
-        body.addProperty("y", minecraft.player.blockPosition().getY());
-        body.addProperty("z", minecraft.player.blockPosition().getZ());
+        // Don't send coordinates — server checks bed config first, falls back to player position
         BridgeClient.post("/agent/" + selectedAgentName + "/spawn", body).thenAccept(result -> {
             Minecraft.getInstance().tell(() -> { selectedSpawned = true; updateButtons(); refreshAgentList(); });
         });
@@ -699,14 +703,15 @@ public class AgentManagementScreen extends Screen {
             g.fill(6, ey + 6, 10, ey + 10, spawned ? 0xFF55FF55 : 0xFF808080);
             g.drawString(font, name, 14, ey + 4, 0xFFFFFF);
 
-            if (agent.has("role") && !agent.get("role").getAsString().isEmpty()) {
-                String role = agent.get("role").getAsString();
-                int mw = LEFT_W - 18;
-                if (font.width(role) > mw) {
-                    while (font.width(role + "..") > mw && role.length() > 1) role = role.substring(0, role.length() - 1);
-                    role += "..";
-                }
-                g.drawString(font, role, 14, ey + 13, 0x505050);
+            // Gamemode badge (small text under name, config page only)
+            if (agent.has("gamemode")) {
+                String gm = agent.get("gamemode").getAsString();
+                int gmColor = switch (gm) {
+                    case "CREATIVE" -> 0xFFAA00;
+                    case "HARDCORE" -> 0xFF5555;
+                    default -> 0x505050;
+                };
+                g.drawString(font, gm.substring(0, 1), LEFT_W - font.width(gm.substring(0, 1)) - 6, ey + 4, gmColor);
             }
         }
 
@@ -961,12 +966,23 @@ public class AgentManagementScreen extends Screen {
         g.drawString(font, I18n.get("gui.agent.config.bed"), rightStart, y, 0x999999);
         y += 14;
 
+        // Bed info + buttons on same row
         if (configHasBed) {
             String bedText = String.format("(%d, %d, %d) %s", configBedX, configBedY, configBedZ,
                 configBedDimension.replace("minecraft:", ""));
-            g.drawString(font, bedText, rightStart, y, 0xFFFFFF);
+            g.drawString(font, bedText, rightStart, y + 4, 0xFFFFFF);
         } else {
-            g.drawString(font, I18n.get("gui.agent.config.bed_none"), rightStart, y, 0x666666);
+            g.drawString(font, I18n.get("gui.agent.config.bed_none"), rightStart, y + 4, 0x666666);
+        }
+        // Position buttons on the right side of the bed row
+        int bedBtnX = rightEnd - 136;
+        if (configSetBedBtn != null) {
+            configSetBedBtn.setX(bedBtnX);
+            configSetBedBtn.setY(y);
+        }
+        if (configResetBedBtn != null) {
+            configResetBedBtn.setX(bedBtnX + 86);
+            configResetBedBtn.setY(y);
         }
 
         // Status message
@@ -1181,14 +1197,10 @@ public class AgentManagementScreen extends Screen {
         monitorState.addUserMessage(text);
 
         if (text.equalsIgnoreCase("/spawn")) {
-            if (minecraft.player != null) {
-                JsonObject body = new JsonObject();
-                body.addProperty("name", agent);
-                body.addProperty("x", minecraft.player.blockPosition().getX());
-                body.addProperty("y", minecraft.player.blockPosition().getY());
-                body.addProperty("z", minecraft.player.blockPosition().getZ());
-                BridgeClient.post("/agent/" + agent + "/spawn", body);
-            }
+            JsonObject body = new JsonObject();
+            body.addProperty("name", agent);
+            // No coordinates — server checks bed config, falls back to player position
+            BridgeClient.post("/agent/" + agent + "/spawn", body);
         } else if (text.equalsIgnoreCase("/despawn")) {
             BridgeClient.post("/agent/" + agent + "/despawn", new JsonObject());
         } else if (text.equalsIgnoreCase("/stop")) {

@@ -165,6 +165,12 @@ public class AgentHttpServer {
             return;
         }
 
+        // Give bed item to player
+        if ("/give-bed".equals(subpath)) {
+            handleGiveBed(exchange, agentName);
+            return;
+        }
+
         // Tell endpoint: sends message + launches runtime (works even if not spawned yet via spawn first)
         if ("/tell".equals(subpath)) {
             handleAgentTell(exchange, agentName);
@@ -363,25 +369,14 @@ public class AgentHttpServer {
         try {
             JsonObject body = readBody(exchange);
             String name = body.get("name").getAsString();
-            int x = body.has("x") ? body.get("x").getAsInt() : 0;
-            int y = body.has("y") ? body.get("y").getAsInt() : 64;
-            int z = body.has("z") ? body.get("z").getAsInt() : 0;
 
             MinecraftServer server = AgentManager.getInstance().getServer();
             CompletableFuture<JsonObject> future = new CompletableFuture<>();
-            final int fx = x, fy = y, fz = z;
             server.execute(() -> {
                 try {
                     ServerLevel level = server.overworld();
-                    // Default coords (0,64,0) → spawn near first online player
-                    BlockPos spawnPos;
-                    if (fx == 0 && fz == 0 && !server.getPlayerList().getPlayers().isEmpty()) {
-                        ServerPlayer player = server.getPlayerList().getPlayers().get(0);
-                        spawnPos = player.blockPosition().offset(2, 0, 0);
-                    } else {
-                        spawnPos = new BlockPos(fx, fy, fz);
-                    }
-                    boolean ok = AgentManager.getInstance().spawn(name, level, spawnPos);
+                    // AgentManager.spawn() handles position: bed → player → world spawn
+                    boolean ok = AgentManager.getInstance().spawn(name, level);
                     JsonObject result = new JsonObject();
                     result.addProperty("ok", ok);
                     if (!ok) result.addProperty("error", "Agent already spawned: " + name);
@@ -472,7 +467,9 @@ public class AgentHttpServer {
                         a.addProperty("defined", true);
 
                         AgentContext ctx = AgentManager.getInstance().getAgent(name);
-                        a.addProperty("spawned", ctx != null);
+                        boolean active = ctx != null && !ctx.isDormant();
+                        a.addProperty("spawned", active);
+                        a.addProperty("dormant", ctx != null && ctx.isDormant());
                         if (ctx != null) {
                             a.addProperty("runtime_running", ctx.isRuntimeRunning());
                             ServerPlayer fp = ctx.getPlayer();
@@ -711,6 +708,34 @@ public class AgentHttpServer {
             }
         } else {
             sendError(exchange, 405, "Method not allowed. Use GET or POST.");
+        }
+    }
+
+    /**
+     * POST /agent/{name}/give-bed — give agent bed item to requesting player.
+     */
+    private void handleGiveBed(HttpExchange exchange, String agentName) throws IOException {
+        if (!assertMethod(exchange, "POST")) return;
+        try {
+            JsonObject body = readBody(exchange);
+            String playerName = body.has("player") ? body.get("player").getAsString() : null;
+            MinecraftServer server = AgentManager.getInstance().getServer();
+            if (server == null || playerName == null) {
+                sendError(exchange, 500, "Server not available");
+                return;
+            }
+            ServerPlayer player = server.getPlayerList().getPlayerByName(playerName);
+            if (player == null) {
+                sendError(exchange, 404, "Player not found: " + playerName);
+                return;
+            }
+            server.execute(() -> com.pyosechang.agent.core.AgentBedHandler.giveBedItem(player, agentName));
+            JsonObject result = new JsonObject();
+            result.addProperty("ok", true);
+            result.addProperty("message", "Agent bed given to " + playerName);
+            sendJson(exchange, 200, result);
+        } catch (Exception e) {
+            sendError(exchange, 500, e.getMessage());
         }
     }
 

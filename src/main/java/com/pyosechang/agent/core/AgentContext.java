@@ -19,6 +19,9 @@ public class AgentContext {
     private final PersonaConfig persona;
     private AgentConfig config;
 
+    // Dormant = entity exists in world (sleeping in bed) but not ticked
+    private boolean dormant = false;
+
     // Runtime process state
     private String sessionId;
     private boolean hasLaunched = false;
@@ -45,6 +48,8 @@ public class AgentContext {
     public PersonaConfig getPersona() { return persona; }
     public AgentConfig getConfig() { return config; }
     public void setConfig(AgentConfig config) { this.config = config; }
+    public boolean isDormant() { return dormant; }
+    public void setDormant(boolean dormant) { this.dormant = dormant; }
 
     public String getSessionId() { return sessionId; }
     public boolean hasLaunched() { return hasLaunched; }

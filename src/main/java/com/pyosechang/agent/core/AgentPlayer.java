@@ -113,6 +113,9 @@ public class AgentPlayer extends ServerPlayer {
 
     @Override
     public boolean isSleeping() {
+        // Dormant: actually sleeping in bed
+        if (this.getSleepingPos().isPresent()) return true;
+        // Sleep voting: agree with real players sleeping
         if (this.level() instanceof ServerLevel sl) {
             for (var p : sl.players()) {
                 if (!(p instanceof AgentPlayer) && p.isSleeping()) return true;
@@ -122,7 +125,7 @@ public class AgentPlayer extends ServerPlayer {
     }
 
     @Override public boolean isSleepingLongEnough() { return this.isSleeping(); }
-    @Override public void stopSleeping() { /* no-op — agents don't use vanilla sleep */ }
+    @Override public void stopSleeping() { /* no-op — handled by AgentManager.wakeUp() */ }
 
     @Override
     public boolean isInvulnerableTo(DamageSource source) {

@@ -55,6 +55,9 @@ public class AgentTickHandler {
         List<String> hardcoreDeaths = null;
 
         for (AgentContext ctx : manager.getAllAgents()) {
+            // Skip dormant agents (sleeping in bed, not active)
+            if (ctx.isDormant()) continue;
+
             ServerPlayer agent = ctx.getPlayer();
 
             // Check for hardcore death flag
