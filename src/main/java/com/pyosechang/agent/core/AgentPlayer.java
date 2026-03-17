@@ -2,11 +2,17 @@ package com.pyosechang.agent.core;
 
 import com.mojang.authlib.GameProfile;
 import com.mojang.logging.LogUtils;
+import com.pyosechang.agent.event.AgentEvent;
+import com.pyosechang.agent.event.EventBus;
+import com.pyosechang.agent.event.EventType;
+import com.google.gson.JsonObject;
+import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.protocol.game.ServerboundClientInformationPacket;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.server.TickTask;
 import net.minecraft.stats.Stat;
 import net.minecraft.world.damagesource.DamageSource;
 import net.minecraft.world.entity.LivingEntity;
@@ -41,10 +47,16 @@ public class AgentPlayer extends ServerPlayer {
     }
 
     private int lastTickedTick = -1;
+    private AgentConfig config;
+    private boolean hardcoreDeath = false;
 
     public AgentPlayer(MinecraftServer server, ServerLevel level, GameProfile profile) {
         super(server, level, profile);
     }
+
+    public void setConfig(AgentConfig config) { this.config = config; }
+    public AgentConfig getConfig() { return config; }
+    public boolean isHardcoreDeath() { return hardcoreDeath; }
 
     @Override
     public void tick() {
@@ -90,7 +102,10 @@ public class AgentPlayer extends ServerPlayer {
         }
 
         // --- From Player.tick() ---
-        this.foodData.tick(this);
+        // Skip hunger for creative mode agents
+        if (config == null || config.getGamemode() != AgentConfig.Gamemode.CREATIVE) {
+            this.foodData.tick(this);
+        }
         this.updatePlayerPose();
     }
 
@@ -107,9 +122,57 @@ public class AgentPlayer extends ServerPlayer {
     }
 
     @Override public boolean isSleepingLongEnough() { return this.isSleeping(); }
-    @Override public void stopSleeping() { /* no-op */ }
-    @Override public boolean isInvulnerableTo(DamageSource source) { return true; }
-    @Override public void die(DamageSource source) { /* no-op */ }
+    @Override public void stopSleeping() { /* no-op — agents don't use vanilla sleep */ }
+
+    @Override
+    public boolean isInvulnerableTo(DamageSource source) {
+        // Creative agents are invulnerable; survival/hardcore take damage
+        return config != null && config.getGamemode() == AgentConfig.Gamemode.CREATIVE;
+    }
+
+    @Override
+    public void die(DamageSource source) {
+        if (config == null || config.getGamemode() == AgentConfig.Gamemode.CREATIVE) return;
+
+        // Publish death event
+        JsonObject data = new JsonObject();
+        data.addProperty("cause", source.getMsgId());
+        data.addProperty("gamemode", config.getGamemode().name());
+        EventBus.getInstance().publish(AgentEvent.of(
+            this.getGameProfile().getName(), EventType.AGENT_DIED, data));
+
+        if (config.getGamemode() == AgentConfig.Gamemode.HARDCORE) {
+            // Flag for tick handler to clean up (avoid heavy I/O in death handler)
+            this.hardcoreDeath = true;
+        } else {
+            // SURVIVAL: respawn at bed or world spawn after 1 tick
+            scheduleRespawn();
+        }
+    }
+
+    private void scheduleRespawn() {
+        this.server.tell(new TickTask(this.server.getTickCount() + 1, () -> {
+            // Reset health and food
+            this.setHealth(this.getMaxHealth());
+            this.getFoodData().setFoodLevel(20);
+            this.getFoodData().setSaturation(5.0f);
+            this.clearFire();
+            this.removeAllEffects();
+
+            // Clear death state
+            this.setDeltaMovement(0, 0, 0);
+            this.dead = false;
+            this.deathTime = 0;
+
+            // Teleport to bed or world spawn
+            if (config.hasBed()) {
+                this.teleportTo(config.getBedX() + 0.5, config.getBedY(), config.getBedZ() + 0.5);
+            } else {
+                BlockPos spawn = this.server.overworld().getSharedSpawnPos();
+                this.teleportTo(spawn.getX() + 0.5, spawn.getY(), spawn.getZ() + 0.5);
+            }
+        }));
+    }
     @Override public void awardStat(Stat<?> stat, int amount) { /* no-op */ }
     @Override public void displayClientMessage(Component message, boolean overlay) { /* no-op */ }
     @Override public void updateOptions(ServerboundClientInformationPacket packet) { /* no-op */ }

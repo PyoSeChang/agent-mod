@@ -16,9 +16,12 @@ import net.minecraft.network.protocol.game.ClientboundPlayerInfoUpdatePacket;
 import net.minecraft.network.protocol.game.ClientboundRemoveEntitiesPacket;
 import net.minecraft.network.protocol.game.ClientboundSetEntityDataPacket;
 import net.minecraft.server.MinecraftServer;
+import net.minecraft.server.TickTask;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.entity.Pose;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.level.GameType;
 import org.slf4j.Logger;
 
 import net.minecraftforge.fml.loading.FMLPaths;
@@ -48,21 +51,51 @@ public class AgentManager {
     public void setServer(MinecraftServer server) { this.server = server; }
     public MinecraftServer getServer() { return server; }
 
+    /**
+     * @param pos spawn position. If null and config has bed, uses bed position.
+     */
     public boolean spawn(String name, ServerLevel level, BlockPos pos) {
         if (agents.containsKey(name)) return false;
+
+        // Load config for gamemode / bed
+        AgentConfig config = AgentConfig.load(name);
+
+        // If no explicit position and bed is set, use bed position
+        boolean spawnFromBed = false;
+        if (pos == null && config.hasBed()) {
+            pos = new BlockPos(config.getBedX(), config.getBedY(), config.getBedZ());
+            spawnFromBed = true;
+        }
+        if (pos == null) {
+            // Fallback to world spawn
+            pos = level.getSharedSpawnPos();
+        }
 
         GameProfile profile = new GameProfile(
             UUID.nameUUIDFromBytes(("Agent_" + name).getBytes()), "[" + name + "]");
 
         // Create AgentPlayer (ServerPlayer subclass)
         AgentPlayer agentPlayer = new AgentPlayer(server, level, profile);
+        agentPlayer.setConfig(config);
 
         // Set up mock network handler (sets agentPlayer.connection)
         new AgentNetHandler(server, agentPlayer);
 
         agentPlayer.setPos(pos.getX() + 0.5, pos.getY(), pos.getZ() + 0.5);
-        agentPlayer.setInvulnerable(true);
-        agentPlayer.setGameMode(net.minecraft.world.level.GameType.SURVIVAL);
+
+        // Apply gamemode from config
+        switch (config.getGamemode()) {
+            case CREATIVE -> {
+                agentPlayer.setInvulnerable(true);
+                agentPlayer.setGameMode(GameType.CREATIVE);
+                agentPlayer.getAbilities().mayfly = true;
+                agentPlayer.getAbilities().flying = false;
+            }
+            case SURVIVAL, HARDCORE -> {
+                agentPlayer.setInvulnerable(false);
+                agentPlayer.setGameMode(GameType.SURVIVAL);
+            }
+        }
 
         // Load persona from .agent/agents/{name}/PERSONA.md
         Path personaFile = FMLPaths.GAMEDIR.get().resolve(".agent/agents/" + name + "/PERSONA.md");
@@ -106,7 +139,18 @@ public class AgentManager {
             }
         }
 
-        LOGGER.info("Agent '{}' spawned at {} {} {}", name, pos.getX(), pos.getY(), pos.getZ());
+        LOGGER.info("Agent '{}' spawned at {} {} {} (gamemode={})", name,
+            pos.getX(), pos.getY(), pos.getZ(), config.getGamemode());
+
+        // Bed spawn animation: appear sleeping, wake up after 1 tick
+        if (spawnFromBed) {
+            agentPlayer.setPose(Pose.SLEEPING);
+            broadcastEntityData(agentPlayer);
+            server.tell(new TickTask(server.getTickCount() + 1, () -> {
+                agentPlayer.setPose(Pose.STANDING);
+                broadcastEntityData(agentPlayer);
+            }));
+        }
 
         JsonObject data = new JsonObject();
         data.addProperty("x", pos.getX());
@@ -122,8 +166,34 @@ public class AgentManager {
         if (ctx == null) return false;
 
         ServerPlayer agentPlayer = ctx.getPlayer();
+        AgentConfig config = ctx.getConfig();
 
-        // Remove from clients: entity + tab list
+        saveInventory(name, agentPlayer);
+
+        // Bed despawn animation: teleport to bed, sleep, then remove after 1 tick
+        if (config.hasBed()) {
+            agentPlayer.teleportTo(config.getBedX() + 0.5, config.getBedY(), config.getBedZ() + 0.5);
+            agentPlayer.setPose(Pose.SLEEPING);
+            broadcastEntityData(agentPlayer);
+            AgentAnimation.broadcast(new net.minecraft.network.protocol.game.ClientboundTeleportEntityPacket(agentPlayer));
+
+            // Delay removal by 1 tick so clients see the sleeping pose
+            server.tell(new TickTask(server.getTickCount() + 1, () -> {
+                removeAgentFromClients(agentPlayer);
+                agentPlayer.discard();
+            }));
+        } else {
+            removeAgentFromClients(agentPlayer);
+            agentPlayer.discard();
+        }
+
+        LOGGER.info("Agent '{}' despawned", name);
+        EventBus.getInstance().publish(AgentEvent.of(name, EventType.DESPAWNED));
+
+        return true;
+    }
+
+    private void removeAgentFromClients(ServerPlayer agentPlayer) {
         ClientboundRemoveEntitiesPacket removePacket =
             new ClientboundRemoveEntitiesPacket(agentPlayer.getId());
         ClientboundPlayerInfoRemovePacket infoRemovePacket =
@@ -135,15 +205,17 @@ public class AgentManager {
                 player.connection.send(infoRemovePacket);
             }
         }
+    }
 
-        saveInventory(name, agentPlayer);
-
-        agentPlayer.discard();
-
-        LOGGER.info("Agent '{}' despawned", name);
-        EventBus.getInstance().publish(AgentEvent.of(name, EventType.DESPAWNED));
-
-        return true;
+    private void broadcastEntityData(ServerPlayer agentPlayer) {
+        var nonDefaults = agentPlayer.getEntityData().getNonDefaultValues();
+        if (nonDefaults != null) {
+            ClientboundSetEntityDataPacket dataPacket =
+                new ClientboundSetEntityDataPacket(agentPlayer.getId(), nonDefaults);
+            for (ServerPlayer player : server.getPlayerList().getPlayers()) {
+                player.connection.send(dataPacket);
+            }
+        }
     }
 
     public void despawnAll() {

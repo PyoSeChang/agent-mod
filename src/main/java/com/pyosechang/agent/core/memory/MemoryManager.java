@@ -283,6 +283,24 @@ public class MemoryManager {
     }
 
     /**
+     * Delete all memories exclusively owned by the given agent.
+     * Only deletes entries where visibleTo contains ONLY this agent (not shared/global ones).
+     */
+    public synchronized int deleteAgentMemories(String agentName) {
+        int before = entries.size();
+        entries.removeIf(e -> {
+            List<String> vt = e.getVisibleTo();
+            return vt.size() == 1 && vt.contains(agentName);
+        });
+        int removed = before - entries.size();
+        if (removed > 0) {
+            save();
+            LOGGER.info("Deleted {} agent-exclusive memories for '{}'", removed, agentName);
+        }
+        return removed;
+    }
+
+    /**
      * Search with optional scope filtering.
      * @param scope null or "all" = all entries,
      *              "global" = entries where isGlobal(),

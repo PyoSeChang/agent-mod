@@ -28,7 +28,7 @@ import java.util.Set;
 public class AgentManagementScreen extends Screen {
 
     // --- Page enum ---
-    private enum Page { MANAGEMENT, MONITOR }
+    private enum Page { MANAGEMENT, MONITOR, CONFIG }
     private Page currentPage = Page.MONITOR;
 
     // --- Shared constants ---
@@ -80,6 +80,16 @@ public class AgentManagementScreen extends Screen {
     private MonitorState monitorState;
     private EditBox commandInput;
 
+    // --- Config page state ---
+    private int configSelectedGamemode = 0; // 0=SURVIVAL, 1=CREATIVE, 2=HARDCORE
+    private static final String[] GAMEMODE_NAMES = {"SURVIVAL", "CREATIVE", "HARDCORE"};
+    private static final int[] GAMEMODE_COLORS = {0xFF55FF55, 0xFFFFAA00, 0xFFFF5555};
+    private boolean configHasBed = false;
+    private int configBedX, configBedY, configBedZ;
+    private String configBedDimension = "minecraft:overworld";
+    private Button configSetBedBtn, configResetBedBtn, configApplyBtn;
+    private String configStatus = "";
+
     public AgentManagementScreen() {
         super(Component.translatable("gui.agent.management.title"));
     }
@@ -97,8 +107,10 @@ public class AgentManagementScreen extends Screen {
 
         if (currentPage == Page.MANAGEMENT) {
             initManagement();
-        } else {
+        } else if (currentPage == Page.MONITOR) {
             initMonitor();
+        } else if (currentPage == Page.CONFIG) {
+            initConfig();
         }
     }
 
@@ -191,6 +203,106 @@ public class AgentManagementScreen extends Screen {
         commandInput.setHint(Component.literal("Type a command...").withStyle(Style.EMPTY.withColor(0xFF555555)));
         commandInput.setMaxLength(500);
         addRenderableWidget(commandInput);
+    }
+
+    private void initConfig() {
+        int btnY = height - 26;
+        int rightStart = LEFT_W + 20;
+
+        configSetBedBtn = addRenderableWidget(Button.builder(
+            Component.translatable("gui.agent.config.set_bed"), btn -> doSetBed())
+            .bounds(rightStart, btnY - 60, 100, 20).build());
+
+        configResetBedBtn = addRenderableWidget(Button.builder(
+            Component.translatable("gui.agent.config.reset_bed"), btn -> doResetBed())
+            .bounds(rightStart + 106, btnY - 60, 60, 20).build());
+
+        configApplyBtn = addRenderableWidget(Button.builder(
+            Component.translatable("gui.agent.config.apply"), btn -> doApplyConfig())
+            .bounds(width / 2 - 40, btnY, 80, 20).build());
+
+        updateConfigButtons();
+        if (selectedAgentName != null) loadConfig();
+    }
+
+    private void updateConfigButtons() {
+        boolean hasAgent = selectedAgentName != null;
+        boolean isManager = "manager".equals(selectedAgentName);
+        if (configSetBedBtn != null) configSetBedBtn.active = hasAgent && !isManager;
+        if (configResetBedBtn != null) configResetBedBtn.active = hasAgent && !isManager && configHasBed;
+        if (configApplyBtn != null) configApplyBtn.active = hasAgent && !isManager;
+    }
+
+    private void loadConfig() {
+        if (selectedAgentName == null || "manager".equals(selectedAgentName)) return;
+        BridgeClient.get("/agent/" + selectedAgentName + "/config").thenAccept(result -> {
+            Minecraft.getInstance().tell(() -> {
+                if (result.has("config")) {
+                    JsonObject cfg = result.getAsJsonObject("config");
+                    String gm = cfg.has("gamemode") ? cfg.get("gamemode").getAsString() : "SURVIVAL";
+                    configSelectedGamemode = switch (gm) {
+                        case "CREATIVE" -> 1;
+                        case "HARDCORE" -> 2;
+                        default -> 0;
+                    };
+                    if (cfg.has("bed") && !cfg.get("bed").isJsonNull()) {
+                        JsonObject bed = cfg.getAsJsonObject("bed");
+                        configHasBed = true;
+                        configBedX = bed.get("x").getAsInt();
+                        configBedY = bed.get("y").getAsInt();
+                        configBedZ = bed.get("z").getAsInt();
+                        configBedDimension = bed.has("dimension") ? bed.get("dimension").getAsString() : "minecraft:overworld";
+                    } else {
+                        configHasBed = false;
+                    }
+                }
+                configStatus = "";
+                updateConfigButtons();
+            });
+        });
+    }
+
+    private void doSetBed() {
+        if (minecraft.player == null) return;
+        configHasBed = true;
+        configBedX = minecraft.player.blockPosition().getX();
+        configBedY = minecraft.player.blockPosition().getY();
+        configBedZ = minecraft.player.blockPosition().getZ();
+        configBedDimension = minecraft.player.level().dimension().location().toString();
+        updateConfigButtons();
+    }
+
+    private void doResetBed() {
+        configHasBed = false;
+        updateConfigButtons();
+    }
+
+    private void doApplyConfig() {
+        if (selectedAgentName == null) return;
+        JsonObject body = new JsonObject();
+        body.addProperty("gamemode", GAMEMODE_NAMES[configSelectedGamemode]);
+        if (minecraft.player != null) {
+            body.addProperty("player", minecraft.player.getName().getString());
+        }
+        if (configHasBed) {
+            JsonObject bed = new JsonObject();
+            bed.addProperty("x", configBedX);
+            bed.addProperty("y", configBedY);
+            bed.addProperty("z", configBedZ);
+            bed.addProperty("dimension", configBedDimension);
+            body.add("bed", bed);
+        } else {
+            body.add("bed", com.google.gson.JsonNull.INSTANCE);
+        }
+        BridgeClient.post("/agent/" + selectedAgentName + "/config", body).thenAccept(result -> {
+            Minecraft.getInstance().tell(() -> {
+                if (result.has("ok") && result.get("ok").getAsBoolean()) {
+                    configStatus = I18n.get("gui.agent.config.saved");
+                } else {
+                    configStatus = result.has("error") ? result.get("error").getAsString() : "Error";
+                }
+            });
+        });
     }
 
     // --- Page switching ---
@@ -294,6 +406,12 @@ public class AgentManagementScreen extends Screen {
 
         // Sync monitor state if available
         syncMonitorSelection();
+
+        // Load config when on Config page
+        if (currentPage == Page.CONFIG) {
+            loadConfig();
+            updateConfigButtons();
+        }
 
         // Only load persona details if on Management page (form fields exist)
         if (currentPage == Page.MANAGEMENT) {
@@ -493,8 +611,10 @@ public class AgentManagementScreen extends Screen {
 
         if (currentPage == Page.MANAGEMENT) {
             renderManagementRightPanel(g, mouseX, mouseY, partialTick);
-        } else {
+        } else if (currentPage == Page.MONITOR) {
             renderMonitorRightPanel(g, mouseX, mouseY, partialTick);
+        } else if (currentPage == Page.CONFIG) {
+            renderConfigRightPanel(g, mouseX, mouseY, partialTick);
         }
     }
 
@@ -505,11 +625,13 @@ public class AgentManagementScreen extends Screen {
         // Tab definitions
         String mgmtLabel = "[Management]";
         String monLabel = "[Monitor]";
+        String cfgLabel = "[Config]";
         int mgmtW = font.width(mgmtLabel);
         int monW = font.width(monLabel);
+        int cfgW = font.width(cfgLabel);
 
         int tabGap = 8;
-        int totalW = mgmtW + tabGap + monW;
+        int totalW = mgmtW + tabGap + monW + tabGap + cfgW;
         int startX = width / 2 - totalW / 2;
 
         // Management tab
@@ -529,6 +651,16 @@ public class AgentManagementScreen extends Screen {
         g.drawString(font, monLabel, monX, 3, monColor);
         if (currentPage == Page.MONITOR) {
             g.fill(monX, TAB_BAR_H - 1, monX + monW, TAB_BAR_H, 0xFFFFFFFF);
+        }
+
+        // Config tab
+        int cfgX = monX + monW + tabGap;
+        int cfgColor = currentPage == Page.CONFIG ? 0xFFFFFFFF : 0xFF888888;
+        boolean cfgHovered = mouseX >= cfgX && mouseX < cfgX + cfgW && mouseY >= 0 && mouseY < TAB_BAR_H;
+        if (cfgHovered && currentPage != Page.CONFIG) cfgColor = 0xFFBBBBBB;
+        g.drawString(font, cfgLabel, cfgX, 3, cfgColor);
+        if (currentPage == Page.CONFIG) {
+            g.fill(cfgX, TAB_BAR_H - 1, cfgX + cfgW, TAB_BAR_H, 0xFFFFFFFF);
         }
     }
 
@@ -771,6 +903,101 @@ public class AgentManagementScreen extends Screen {
         super.render(g, mouseX, mouseY, partialTick);
     }
 
+    private void renderConfigRightPanel(GuiGraphics g, int mouseX, int mouseY, float partialTick) {
+        int rightStart = LEFT_W + 20;
+        int rightEnd = width - 20;
+
+        if (selectedAgentName == null || "manager".equals(selectedAgentName)) {
+            int cx = (LEFT_W + width) / 2;
+            g.drawCenteredString(font, I18n.get("gui.agent.config.select_agent"), cx, height / 2, 0x808080);
+            super.render(g, mouseX, mouseY, partialTick);
+            return;
+        }
+
+        int y = TAB_BAR_H + 20;
+
+        // Agent name + status
+        g.drawString(font, "Agent: " + selectedAgentName, rightStart, y, 0xFFFFFF);
+        String status = I18n.get(selectedSpawned ? "gui.agent.management.spawned" : "gui.agent.management.offline");
+        int sc = selectedSpawned ? 0xFF55FF55 : 0xFF666666;
+        g.drawString(font, status, rightEnd - font.width(status), y, sc);
+        y += 20;
+
+        // --- Gamemode section ---
+        g.fill(rightStart, y, rightEnd, y + 1, 0x30FFFFFF);
+        y += 6;
+        g.drawString(font, I18n.get("gui.agent.config.gamemode"), rightStart, y, 0x999999);
+        y += 14;
+
+        // Radio buttons for gamemode
+        for (int i = 0; i < 3; i++) {
+            int rx = rightStart + i * 90;
+            int ry = y;
+            boolean selected = configSelectedGamemode == i;
+            boolean hovered = mouseX >= rx && mouseX < rx + 85 && mouseY >= ry && mouseY < ry + 14;
+
+            // Radio circle
+            int circleColor = selected ? GAMEMODE_COLORS[i] : 0xFF555555;
+            g.fill(rx, ry + 2, rx + 8, ry + 10, 0xFF222222);
+            if (selected) g.fill(rx + 2, ry + 4, rx + 6, ry + 8, circleColor);
+            g.drawString(font, I18n.get("gui.agent.config.gamemode." + GAMEMODE_NAMES[i].toLowerCase()),
+                rx + 12, ry + 2, selected ? GAMEMODE_COLORS[i] : (hovered ? 0xBBBBBB : 0x888888));
+        }
+        y += 20;
+
+        // Warnings
+        if (configSelectedGamemode == 1) { // CREATIVE
+            g.drawString(font, I18n.get("gui.agent.config.creative_warning"), rightStart, y, 0xFFAA00);
+            y += 12;
+        } else if (configSelectedGamemode == 2) { // HARDCORE
+            g.drawString(font, I18n.get("gui.agent.config.hardcore_warning"), rightStart, y, 0xFF5555);
+            y += 12;
+        }
+        y += 10;
+
+        // --- Bed section ---
+        g.fill(rightStart, y, rightEnd, y + 1, 0x30FFFFFF);
+        y += 6;
+        g.drawString(font, I18n.get("gui.agent.config.bed"), rightStart, y, 0x999999);
+        y += 14;
+
+        if (configHasBed) {
+            String bedText = String.format("(%d, %d, %d) %s", configBedX, configBedY, configBedZ,
+                configBedDimension.replace("minecraft:", ""));
+            g.drawString(font, bedText, rightStart, y, 0xFFFFFF);
+        } else {
+            g.drawString(font, I18n.get("gui.agent.config.bed_none"), rightStart, y, 0x666666);
+        }
+
+        // Status message
+        if (!configStatus.isEmpty()) {
+            g.drawCenteredString(font, configStatus, (LEFT_W + width) / 2, height - 46, 0x55FF55);
+        }
+
+        super.render(g, mouseX, mouseY, partialTick);
+    }
+
+    private boolean mouseClickedConfigRight(double mouseX, double mouseY, int button) {
+        if (selectedAgentName == null || "manager".equals(selectedAgentName)) {
+            return super.mouseClicked(mouseX, mouseY, button);
+        }
+
+        int rightStart = LEFT_W + 20;
+        int y = TAB_BAR_H + 20 + 20 + 6 + 14; // matches renderConfigRightPanel gamemode radio Y
+
+        // Gamemode radio click
+        for (int i = 0; i < 3; i++) {
+            int rx = rightStart + i * 90;
+            if (mouseX >= rx && mouseX < rx + 85 && mouseY >= y && mouseY < y + 14) {
+                configSelectedGamemode = i;
+                configStatus = "";
+                return true;
+            }
+        }
+
+        return super.mouseClicked(mouseX, mouseY, button);
+    }
+
     // === Input handling ===
 
     @Override
@@ -780,10 +1007,12 @@ public class AgentManagementScreen extends Screen {
             if (mouseY >= 0 && mouseY < TAB_BAR_H) {
                 String mgmtLabel = "[Management]";
                 String monLabel = "[Monitor]";
+                String cfgLabel = "[Config]";
                 int mgmtW = font.width(mgmtLabel);
                 int monW = font.width(monLabel);
+                int cfgW = font.width(cfgLabel);
                 int tabGap = 8;
-                int totalW = mgmtW + tabGap + monW;
+                int totalW = mgmtW + tabGap + monW + tabGap + cfgW;
                 int startX = width / 2 - totalW / 2;
 
                 if (mouseX >= startX && mouseX < startX + mgmtW) {
@@ -793,6 +1022,11 @@ public class AgentManagementScreen extends Screen {
                 int monX = startX + mgmtW + tabGap;
                 if (mouseX >= monX && mouseX < monX + monW) {
                     switchPage(Page.MONITOR);
+                    return true;
+                }
+                int cfgX = monX + monW + tabGap;
+                if (mouseX >= cfgX && mouseX < cfgX + cfgW) {
+                    switchPage(Page.CONFIG);
                     return true;
                 }
             }
@@ -813,8 +1047,9 @@ public class AgentManagementScreen extends Screen {
             // Right panel clicks (page-specific)
             if (currentPage == Page.MANAGEMENT) {
                 return mouseClickedManagementRight(mouseX, mouseY, button);
+            } else if (currentPage == Page.CONFIG) {
+                return mouseClickedConfigRight(mouseX, mouseY, button);
             }
-            // Monitor right panel has no special click handling beyond widgets
         }
         return super.mouseClicked(mouseX, mouseY, button);
     }
@@ -881,6 +1116,10 @@ public class AgentManagementScreen extends Screen {
                 switchPage(Page.MONITOR);
                 return true;
             }
+            if (keyCode == 51) { // '3'
+                switchPage(Page.CONFIG);
+                return true;
+            }
         }
 
         if (currentPage == Page.MONITOR) {
@@ -931,9 +1170,10 @@ public class AgentManagementScreen extends Screen {
             return (nameBox != null && nameBox.isFocused())
                 || (roleBox != null && roleBox.isFocused())
                 || (personalityBox != null && personalityBox.isFocused());
-        } else {
+        } else if (currentPage == Page.MONITOR) {
             return commandInput != null && commandInput.isFocused();
         }
+        return false; // CONFIG page has no edit boxes
     }
 
     private void sendMonitorCommand(String text) {

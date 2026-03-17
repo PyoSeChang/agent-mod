@@ -109,5 +109,19 @@
   "tool.agent.use_item_on": "아이템 사용",
   "tool.agent.use_item_on.desc": "블록 면에 우클릭 — 괭이질, 씨앗 심기, 레버 당기기 등",
   "tool.agent.use_item_on_area": "영역에 아이템 사용",
-  "tool.agent.use_item_on_area.desc": "2D 영역의 모든 블록에 우클릭 — 밭 갈기, 씨앗 심기에 유용"
+  "tool.agent.use_item_on_area.desc": "2D 영역의 모든 블록에 우클릭 — 밭 갈기, 씨앗 심기에 유용",
+
+  "gui.agent.config.select_agent": "설정할 에이전트를 선택하세요",
+  "gui.agent.config.gamemode": "게임모드",
+  "gui.agent.config.gamemode.survival": "서바이벌",
+  "gui.agent.config.gamemode.creative": "크리에이티브",
+  "gui.agent.config.gamemode.hardcore": "하드코어",
+  "gui.agent.config.creative_warning": "플레이어가 크리에이티브 모드여야 합니다",
+  "gui.agent.config.hardcore_warning": "사망 시 에이전트가 영구 삭제됩니다!",
+  "gui.agent.config.bed": "침대 위치",
+  "gui.agent.config.bed_none": "설정 안 됨",
+  "gui.agent.config.set_bed": "침대 설정",
+  "gui.agent.config.reset_bed": "초기화",
+  "gui.agent.config.apply": "적용",
+  "gui.agent.config.saved": "설정 저장됨!"
 }

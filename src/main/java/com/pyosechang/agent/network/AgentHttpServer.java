@@ -6,6 +6,7 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import com.mojang.logging.LogUtils;
+import com.pyosechang.agent.core.AgentConfig;
 import com.pyosechang.agent.core.AgentContext;
 import com.pyosechang.agent.core.AgentLogger;
 import com.pyosechang.agent.core.AgentManager;
@@ -155,6 +156,12 @@ public class AgentHttpServer {
         // Persona endpoint works even when agent is not spawned
         if ("/persona".equals(subpath)) {
             handlePersona(exchange, agentName);
+            return;
+        }
+
+        // Config endpoint works even when agent is not spawned
+        if ("/config".equals(subpath)) {
+            handleConfig(exchange, agentName);
             return;
         }
 
@@ -487,6 +494,11 @@ public class AgentHttpServer {
                             a.addProperty("has_persona", false);
                         }
 
+                        // Read config summary
+                        AgentConfig cfg = AgentConfig.load(name);
+                        a.addProperty("gamemode", cfg.getGamemode().name());
+                        a.addProperty("has_bed", cfg.hasBed());
+
                         agents.add(a);
                     });
                 }
@@ -611,6 +623,88 @@ public class AgentHttpServer {
                 JsonObject result = new JsonObject();
                 result.addProperty("ok", true);
                 result.addProperty("message", "Persona saved. Despawn and respawn to apply changes.");
+                sendJson(exchange, 200, result);
+            } catch (Exception e) {
+                sendError(exchange, 500, e.getMessage());
+            }
+        } else {
+            sendError(exchange, 405, "Method not allowed. Use GET or POST.");
+        }
+    }
+
+    /**
+     * GET/POST /agent/{name}/config — read or write agent config (gamemode, bed).
+     */
+    private void handleConfig(HttpExchange exchange, String agentName) throws IOException {
+        if ("GET".equalsIgnoreCase(exchange.getRequestMethod())) {
+            try {
+                AgentConfig config = AgentConfig.load(agentName);
+                JsonObject result = new JsonObject();
+                result.addProperty("ok", true);
+                result.addProperty("name", agentName);
+                result.add("config", config.toJson());
+                sendJson(exchange, 200, result);
+            } catch (Exception e) {
+                sendError(exchange, 500, e.getMessage());
+            }
+        } else if ("POST".equalsIgnoreCase(exchange.getRequestMethod())) {
+            try {
+                JsonObject body = readBody(exchange);
+                AgentConfig config = AgentConfig.load(agentName);
+
+                // Gamemode update
+                if (body.has("gamemode")) {
+                    String gm = body.get("gamemode").getAsString();
+                    AgentConfig.Gamemode newMode;
+                    try {
+                        newMode = AgentConfig.Gamemode.valueOf(gm);
+                    } catch (IllegalArgumentException e) {
+                        sendError(exchange, 400, "Invalid gamemode: " + gm);
+                        return;
+                    }
+
+                    // CREATIVE restriction: check if requesting player is creative
+                    if (newMode == AgentConfig.Gamemode.CREATIVE && body.has("player")) {
+                        String playerName = body.get("player").getAsString();
+                        MinecraftServer server = AgentManager.getInstance().getServer();
+                        if (server != null) {
+                            ServerPlayer requestingPlayer = server.getPlayerList().getPlayerByName(playerName);
+                            if (requestingPlayer != null && !requestingPlayer.isCreative()) {
+                                sendError(exchange, 403, "Creative mode requires the player to be in creative mode");
+                                return;
+                            }
+                        }
+                    }
+                    config.setGamemode(newMode);
+                }
+
+                // Bed update
+                if (body.has("bed")) {
+                    if (body.get("bed").isJsonNull()) {
+                        config.clearBed();
+                    } else {
+                        JsonObject bed = body.getAsJsonObject("bed");
+                        config.setBed(
+                            bed.get("x").getAsInt(),
+                            bed.get("y").getAsInt(),
+                            bed.get("z").getAsInt(),
+                            bed.has("dimension") ? bed.get("dimension").getAsString() : "minecraft:overworld"
+                        );
+                    }
+                }
+
+                config.save(agentName);
+
+                // Update in-memory config if agent is spawned
+                AgentContext ctx = AgentManager.getInstance().getAgent(agentName);
+                if (ctx != null) {
+                    ctx.setConfig(config);
+                }
+
+                JsonObject result = new JsonObject();
+                result.addProperty("ok", true);
+                result.addProperty("message", "Config saved. Despawn and respawn to apply gamemode changes.");
+                result.add("config", config.toJson());
                 sendJson(exchange, 200, result);
             } catch (Exception e) {
                 sendError(exchange, 500, e.getMessage());
