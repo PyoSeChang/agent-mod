@@ -26,6 +26,7 @@ Thumbs.db
 
 # Claude
 .claude/
+!.claude/skills/
 
 # Obsidian
 docs/.obsidian/
