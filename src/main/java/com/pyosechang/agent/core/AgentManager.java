@@ -15,6 +15,9 @@ import net.minecraft.network.protocol.game.ClientboundPlayerInfoRemovePacket;
 import net.minecraft.network.protocol.game.ClientboundPlayerInfoUpdatePacket;
 import net.minecraft.network.protocol.game.ClientboundRemoveEntitiesPacket;
 import net.minecraft.network.protocol.game.ClientboundSetEntityDataPacket;
+import net.minecraft.network.protocol.game.ClientboundSetEquipmentPacket;
+import net.minecraft.world.entity.EquipmentSlot;
+import com.mojang.datafixers.util.Pair;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.TickTask;
 import net.minecraft.server.level.ServerLevel;
@@ -224,12 +227,16 @@ public class AgentManager {
         ClientboundSetEntityDataPacket dataPacket =
             new ClientboundSetEntityDataPacket(agentPlayer.getId(),
                 agentPlayer.getEntityData().getNonDefaultValues());
+        ClientboundSetEquipmentPacket equipPacket = buildEquipmentPacket(agentPlayer);
 
         for (ServerPlayer player : server.getPlayerList().getPlayers()) {
             player.connection.send(infoPacket);
             player.connection.send(spawnPacket);
             if (dataPacket.packedItems() != null) {
                 player.connection.send(dataPacket);
+            }
+            if (equipPacket != null) {
+                player.connection.send(equipPacket);
             }
         }
     }
@@ -307,6 +314,21 @@ public class AgentManager {
         return true;
     }
 
+    /**
+     * Build equipment packet for all non-empty slots. Returns null if no equipment.
+     */
+    static ClientboundSetEquipmentPacket buildEquipmentPacket(ServerPlayer agentPlayer) {
+        List<Pair<EquipmentSlot, ItemStack>> equipment = new java.util.ArrayList<>();
+        for (EquipmentSlot slot : EquipmentSlot.values()) {
+            ItemStack stack = agentPlayer.getItemBySlot(slot);
+            if (!stack.isEmpty()) {
+                equipment.add(Pair.of(slot, stack.copy()));
+            }
+        }
+        if (equipment.isEmpty()) return null;
+        return new ClientboundSetEquipmentPacket(agentPlayer.getId(), equipment);
+    }
+
     private void broadcastEntityData(ServerPlayer agentPlayer) {
         var nonDefaults = agentPlayer.getEntityData().getNonDefaultValues();
         if (nonDefaults != null) {
@@ -345,11 +367,15 @@ public class AgentManager {
             ClientboundSetEntityDataPacket dataPacket =
                 new ClientboundSetEntityDataPacket(agentPlayer.getId(),
                     agentPlayer.getEntityData().getNonDefaultValues());
+            ClientboundSetEquipmentPacket equipPacket = buildEquipmentPacket(agentPlayer);
 
             player.connection.send(infoPacket);
             player.connection.send(spawnPacket);
             if (dataPacket.packedItems() != null) {
                 player.connection.send(dataPacket);
+            }
+            if (equipPacket != null) {
+                player.connection.send(equipPacket);
             }
         }
     }

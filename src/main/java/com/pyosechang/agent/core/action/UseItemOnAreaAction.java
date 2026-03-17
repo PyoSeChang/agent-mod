@@ -196,7 +196,6 @@ public class UseItemOnAreaAction implements AsyncAction {
         }
 
         pathFollower.tick(agent);
-        AgentAnimation.broadcast(new net.minecraft.network.protocol.game.ClientboundTeleportEntityPacket(agent));
 
         if (pathFollower.isFinished()) {
             subState = SubState.NEXT_POS;

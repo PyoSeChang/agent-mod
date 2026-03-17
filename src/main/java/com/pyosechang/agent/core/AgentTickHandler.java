@@ -73,11 +73,15 @@ public class AgentTickHandler {
             // 2) Then tick agent — aiStep/travel applies deltaMovement with physics
             agent.tick();
 
-            // Sync position to clients every second (20 ticks)
+            // Sync position + equipment to clients every second (20 ticks)
             // ServerPlayer is not in PlayerList, so entity tracker may not reliably
-            // broadcast position updates. This prevents client-side visual desync.
+            // broadcast updates. This prevents client-side visual desync.
             if (agent.getServer().getTickCount() % 20 == 0) {
                 AgentAnimation.broadcast(new ClientboundTeleportEntityPacket(agent));
+                var equipPacket = AgentManager.buildEquipmentPacket(agent);
+                if (equipPacket != null) {
+                    AgentAnimation.broadcast(equipPacket);
+                }
             }
 
             // Auto-pickup nearby items (2-block radius)

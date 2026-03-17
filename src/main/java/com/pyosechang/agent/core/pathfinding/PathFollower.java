@@ -14,7 +14,7 @@ import java.util.List;
 public class PathFollower {
 
     private static final double MOVE_SPEED = 0.215; // ~4.3 blocks/sec at 20 tps
-    private static final double WAYPOINT_THRESHOLD = 0.3;
+    private static final double WAYPOINT_THRESHOLD = 0.5;
     private static final double JUMP_VELOCITY = 0.42; // vanilla jump strength
 
     private List<BlockPos> path = Collections.emptyList();
@@ -117,5 +117,14 @@ public class PathFollower {
     public BlockPos getCurrentTarget() {
         if (!active || currentIndex >= path.size()) return null;
         return path.get(currentIndex);
+    }
+
+    /**
+     * @return a waypoint N steps ahead of the current index (clamped to path end), or null if not active
+     */
+    public BlockPos getLookAheadTarget(int lookahead) {
+        if (!active || path.isEmpty()) return null;
+        int idx = Math.min(currentIndex + lookahead, path.size() - 1);
+        return path.get(idx);
     }
 }

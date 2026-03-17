@@ -1,5 +1,34 @@
 # CHANGELOG
 
+## v0.8.2 — 2026-03-17 `[actions, body, infra]`
+
+이동 시 도리도리/끼임 수정, 장비(손 아이템) 가시성 수정, 액션 내 불필요한 위치 브로드캐스트 제거.
+
+### 변경 사항
+
+**`actions`**
+- `PathFollower`: WAYPOINT_THRESHOLD 0.3 → 0.5 (블록 모서리 충돌 시 끼임 방지)
+- `PathFollower`: `getLookAheadTarget(n)` 메서드 추가 (N 웨이포인트 앞 참조)
+- `MoveToAction`: lookAt 대상을 즉시 다음 웨이포인트 → 3웨이포인트 앞으로 변경 (지그재그 경로에서 90도 도리도리 해소)
+- `MoveToAction`: `broadcastPosition()` 제거 — `agent.tick()` 전에 이전 좌표를 브로드캐스트하여 시각적 떨림 유발
+- `MineBlockAction`: tickCollecting 내 수동 TeleportEntityPacket 브로드캐스트 제거
+- `MineAreaAction`: tickWalking 내 수동 TeleportEntityPacket 브로드캐스트 제거
+- `UseItemOnAreaAction`: tickWalking 내 수동 TeleportEntityPacket 브로드캐스트 제거
+
+**`body`**
+- `AgentTickHandler`: 20틱 주기 동기화에 장비(`ClientboundSetEquipmentPacket`) 브로드캐스트 추가 — 장비 변경이 최대 1초 내에 클라이언트 반영
+
+**`infra`**
+- `AgentManager.sendSpawnPackets()`: `ClientboundSetEquipmentPacket` 추가 — 스폰 시 손 아이템/갑옷 즉시 가시화
+- `AgentManager.sendAgentInfoToPlayer()`: 동일하게 장비 패킷 추가
+- `AgentManager.buildEquipmentPacket()`: 장비 슬롯 → 패킷 변환 유틸 메서드 추가
+
+### 설계 판단
+
+- **수동 브로드캐스트 제거**: 액션 tick에서 `agent.tick()` 전에 위치를 브로드캐스트하면 클라이언트가 이전 좌표를 받아 시각적 떨림 발생. `AgentTickHandler`의 20틱 주기 브로드캐스트(`agent.tick()` 후)에 일원화.
+- **lookAhead(3)**: A* 경로가 4방향(대각선 없음)이라 인접 웨이포인트를 바라보면 매 블록마다 90도 회전. 3블록 앞을 바라보면 이동 방향이 자연스럽게 보간됨.
+- **장비 브로드캐스트**: 엔티티 트래커가 AgentPlayer(PlayerList 미등록)의 장비를 안정적으로 동기화하지 않음. 스폰 시 + 20틱 주기로 명시적 전송.
+
 ## v0.8.1 — 2026-03-17 `[multi-agent, body, infra]`
 
 에이전트 Config 고도화 — 서바이벌 세부 옵션 + 침대/리스폰 버그 수정.

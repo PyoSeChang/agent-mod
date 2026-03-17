@@ -2,11 +2,9 @@ package com.pyosechang.agent.core.action;
 
 import com.google.gson.JsonObject;
 import com.pyosechang.agent.core.AgentAnimation;
-import com.pyosechang.agent.core.AgentManager;
 import com.pyosechang.agent.core.pathfinding.PathFollower;
 import com.pyosechang.agent.core.pathfinding.Pathfinder;
 import net.minecraft.core.BlockPos;
-import net.minecraft.network.protocol.game.ClientboundTeleportEntityPacket;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 
@@ -89,17 +87,14 @@ public class MoveToAction implements AsyncAction {
             return;
         }
 
-        // Look at next waypoint
-        BlockPos nextWaypoint = pathFollower.getCurrentTarget();
-        if (nextWaypoint != null) {
-            AgentAnimation.lookAt(agent, nextWaypoint.getX() + 0.5, agent.getEyeY(), nextWaypoint.getZ() + 0.5);
+        // Look ahead several waypoints to smooth head rotation on zigzag paths
+        BlockPos lookTarget = pathFollower.getLookAheadTarget(3);
+        if (lookTarget != null) {
+            AgentAnimation.lookAt(agent, lookTarget.getX() + 0.5, agent.getEyeY(), lookTarget.getZ() + 0.5);
         }
 
         // Tick the path follower
         pathFollower.tick(agent);
-
-        // Broadcast position to all clients
-        broadcastPosition(agent);
 
         // Check if finished
         if (pathFollower.isFinished()) {
@@ -161,16 +156,6 @@ public class MoveToAction implements AsyncAction {
         result.addProperty("error", error);
         future.complete(result);
         return future;
-    }
-
-    private void broadcastPosition(ServerPlayer agent) {
-        ClientboundTeleportEntityPacket packet = new ClientboundTeleportEntityPacket(agent);
-        var server = AgentManager.getInstance().getServer();
-        if (server != null) {
-            for (ServerPlayer player : server.getPlayerList().getPlayers()) {
-                player.connection.send(packet);
-            }
-        }
     }
 
     private JsonObject posToJson(ServerPlayer agent) {
