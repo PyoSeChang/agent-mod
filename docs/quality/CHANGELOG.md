@@ -1,5 +1,57 @@
 # CHANGELOG
 
+## v0.8.1 — 2026-03-17 `[multi-agent, body, infra]`
+
+에이전트 Config 고도화 — 서바이벌 세부 옵션 + 침대/리스폰 버그 수정.
+
+### 변경 사항
+
+**`multi-agent`**
+- `AgentConfig`: 서바이벌 세부 옵션 3개 추가 (기본값 true, CREATIVE일 때 무시)
+  - `takeDamage`: 데미지 수신 여부
+  - `hungerEnabled`: 허기 감소 여부
+  - `mobTargetable`: 몹 어그로 대상 여부
+- `AgentManagementScreen` CONFIG 탭: Survival Options 섹션 추가
+  - 3개 체크박스 (Damage / Hunger / Mob Target), CREATIVE일 때 숨김
+  - Apply 시 서바이벌 옵션도 함께 전송
+
+**`body`**
+- `AgentPlayer.isInvulnerableTo()`: `takeDamage=false` → 무적, `mobTargetable=false` → 몹 데미지 무시
+- `AgentPlayer.canBeSeenAsEnemy()`: `mobTargetable=false` → 몹 AI가 타겟으로 인식 안 함
+- `AgentPlayer.tick()`: `hungerEnabled=false` → foodData.tick() 스킵
+- `AgentPlayer.hurt()`: dormant 에이전트는 데미지 무시 (spawn 해야 상호작용 가능)
+- `AgentPlayer.scheduleRespawn()`: 리스폰 위치를 `BedBlock.findStandUpPosition()` 으로 침대 옆에 서기 (기존 침대 밑에 깔리던 문제 수정)
+  - 즉시 `setHealth(1) + dead=false` 로 바닐라 사망 상태 차단
+  - 침대 블록 없으면 블록 위 Y+1.0 fallback
+- `AgentManager.sleepInBed()`: bed block 존재 확인 후 수면 (boolean 반환)
+- `AgentManager.spawnDormant()`: 침대 블록 없으면 dormant 생성 스킵
+- `AgentManager.despawn()`: sleepInBed 실패 시 entity 완전 제거
+
+**`infra`**
+- `AgentHttpServer` config POST: `takeDamage`, `hungerEnabled`, `mobTargetable` 필드 처리
+- Config 변경 → `server.execute()` 로 서버 스레드에서 AgentContext + AgentPlayer 양쪽 갱신 (실시간 적용)
+- i18n: Survival Options 관련 4개 키 추가
+
+### 설계 판단
+
+- **서바이벌 옵션 = 게임모드 내 세부 토글**: 게임모드를 늘리지 않고 SURVIVAL/HARDCORE 내에서 개별 메카닉 on/off. CREATIVE에서는 전부 off로 간주.
+- **dormant = 무적**: 자고 있는 에이전트에게 데미지 → spawn 판정되는 문제 방지. GUI Spawn으로만 활성화.
+- **Config 실시간 적용**: HTTP 스레드에서 config 갱신 → 서버 스레드 동기화 필수. `server.execute()` 래핑.
+
+### 파일 변경 요약
+
+| 파일 | 구분 | 컴포넌트 |
+|------|------|----------|
+| `core/AgentConfig.java` | 수정 | multi-agent |
+| `core/AgentPlayer.java` | 수정 | body |
+| `core/AgentManager.java` | 수정 | body |
+| `client/AgentManagementScreen.java` | 수정 | multi-agent |
+| `network/AgentHttpServer.java` | 수정 | infra |
+| `lang/en_us.json` | 수정 | infra |
+| `lang/ko_kr.json` | 수정 | infra |
+
+---
+
 ## v0.8.0 — 2026-03-17 `[multi-agent, body, memory, event, infra]`
 
 에이전트별 Config 시스템 + Dormant(수면) 라이프사이클. 게임모드(서바이벌/크리에이티브/하드코어)와 침대 스폰을 G키 CONFIG 탭에서 설정. 침대 설치 → 에이전트 자동 눕기, Spawn = 침대에서 일어남, Despawn = 침대에 자러감. 서버 시작 시 bed 에이전트 자동 dormant. 하드코어 사망 시 영구 삭제.

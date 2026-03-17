@@ -87,6 +87,9 @@ public class AgentManagementScreen extends Screen {
     private boolean configHasBed = false;
     private int configBedX, configBedY, configBedZ;
     private String configBedDimension = "minecraft:overworld";
+    private boolean configTakeDamage = true;
+    private boolean configHungerEnabled = true;
+    private boolean configMobTargetable = true;
     private Button configSetBedBtn, configResetBedBtn, configApplyBtn;
     private String configStatus = "";
 
@@ -256,6 +259,9 @@ public class AgentManagementScreen extends Screen {
                     } else {
                         configHasBed = false;
                     }
+                    configTakeDamage = !cfg.has("takeDamage") || cfg.get("takeDamage").getAsBoolean();
+                    configHungerEnabled = !cfg.has("hungerEnabled") || cfg.get("hungerEnabled").getAsBoolean();
+                    configMobTargetable = !cfg.has("mobTargetable") || cfg.get("mobTargetable").getAsBoolean();
                 }
                 configStatus = "";
                 updateConfigButtons();
@@ -296,10 +302,12 @@ public class AgentManagementScreen extends Screen {
         if (selectedAgentName == null) return;
         JsonObject body = new JsonObject();
         body.addProperty("gamemode", GAMEMODE_NAMES[configSelectedGamemode]);
+        body.addProperty("takeDamage", configTakeDamage);
+        body.addProperty("hungerEnabled", configHungerEnabled);
+        body.addProperty("mobTargetable", configMobTargetable);
         if (minecraft.player != null) {
             body.addProperty("player", minecraft.player.getName().getString());
         }
-        // Bed is managed by give-bed / reset-bed, not by apply — only send gamemode
         BridgeClient.post("/agent/" + selectedAgentName + "/config", body).thenAccept(result -> {
             Minecraft.getInstance().tell(() -> {
                 if (result.has("ok") && result.get("ok").getAsBoolean()) {
@@ -960,6 +968,35 @@ public class AgentManagementScreen extends Screen {
         }
         y += 10;
 
+        // --- Survival options (only for SURVIVAL/HARDCORE) ---
+        if (configSelectedGamemode != 1) { // not CREATIVE
+            g.fill(rightStart, y, rightEnd, y + 1, 0x30FFFFFF);
+            y += 6;
+            g.drawString(font, I18n.get("gui.agent.config.survival_options"), rightStart, y, 0x999999);
+            y += 14;
+
+            // Three checkboxes in a row
+            String[] optLabels = {
+                I18n.get("gui.agent.config.take_damage"),
+                I18n.get("gui.agent.config.hunger"),
+                I18n.get("gui.agent.config.mob_target")
+            };
+            boolean[] optValues = { configTakeDamage, configHungerEnabled, configMobTargetable };
+            int optSpacing = 90;
+            for (int i = 0; i < 3; i++) {
+                int ox = rightStart + i * optSpacing;
+                // Checkbox
+                g.fill(ox, y, ox + 8, y + 8, 0xFF222222);
+                g.fill(ox, y, ox + 8, y + 1, 0xFF555555);
+                g.fill(ox, y + 7, ox + 8, y + 8, 0xFF555555);
+                g.fill(ox, y, ox + 1, y + 8, 0xFF555555);
+                g.fill(ox + 7, y, ox + 8, y + 8, 0xFF555555);
+                if (optValues[i]) g.fill(ox + 2, y + 2, ox + 6, y + 6, 0xFF55FF55);
+                g.drawString(font, optLabels[i], ox + 11, y, optValues[i] ? 0xFFFFFF : 0x888888);
+            }
+            y += 16;
+        }
+
         // --- Bed section ---
         g.fill(rightStart, y, rightEnd, y + 1, 0x30FFFFFF);
         y += 6;
@@ -1008,6 +1045,28 @@ public class AgentManagementScreen extends Screen {
                 configSelectedGamemode = i;
                 configStatus = "";
                 return true;
+            }
+        }
+        y += 20;
+
+        // Survival options checkboxes (skip warnings height)
+        if (configSelectedGamemode == 1) y += 12; // CREATIVE warning
+        else if (configSelectedGamemode == 2) y += 12; // HARDCORE warning
+        y += 10 + 6 + 14; // separator + label
+
+        if (configSelectedGamemode != 1) { // not CREATIVE
+            int optSpacing = 90;
+            for (int i = 0; i < 3; i++) {
+                int ox = rightStart + i * optSpacing;
+                if (mouseX >= ox && mouseX < ox + optSpacing && mouseY >= y && mouseY < y + 10) {
+                    switch (i) {
+                        case 0 -> configTakeDamage = !configTakeDamage;
+                        case 1 -> configHungerEnabled = !configHungerEnabled;
+                        case 2 -> configMobTargetable = !configMobTargetable;
+                    }
+                    configStatus = "";
+                    return true;
+                }
             }
         }
 

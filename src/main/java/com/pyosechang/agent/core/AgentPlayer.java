@@ -102,8 +102,8 @@ public class AgentPlayer extends ServerPlayer {
         }
 
         // --- From Player.tick() ---
-        // Skip hunger for creative mode agents
-        if (config == null || config.getGamemode() != AgentConfig.Gamemode.CREATIVE) {
+        // Skip hunger for creative or when hunger is disabled
+        if (config == null || (config.getGamemode() != AgentConfig.Gamemode.CREATIVE && config.isHungerEnabled())) {
             this.foodData.tick(this);
         }
         this.updatePlayerPose();
@@ -129,15 +129,35 @@ public class AgentPlayer extends ServerPlayer {
 
     @Override
     public boolean isInvulnerableTo(DamageSource source) {
-        // Creative agents are invulnerable; survival/hardcore take damage
-        return config != null && config.getGamemode() == AgentConfig.Gamemode.CREATIVE;
+        if (config == null) return true;
+        if (config.getGamemode() == AgentConfig.Gamemode.CREATIVE) return true;
+        if (!config.isTakeDamage()) return true;
+        if (!config.isMobTargetable() && source.getEntity() != null
+                && !(source.getEntity() instanceof net.minecraft.world.entity.player.Player)) {
+            return true;
+        }
+        return false;
+    }
+
+    @Override
+    public boolean canBeSeenAsEnemy() {
+        if (config != null && !config.isMobTargetable()) return false;
+        return super.canBeSeenAsEnemy();
+    }
+
+    @Override
+    public boolean hurt(DamageSource source, float amount) {
+        // Dormant agents (sleeping in bed) are invulnerable — spawn them first to interact
+        String agentName = this.getGameProfile().getName().replace("[", "").replace("]", "");
+        AgentContext ctx = AgentManager.getInstance().getAgent(agentName);
+        if (ctx != null && ctx.isDormant()) return false;
+        return super.hurt(source, amount);
     }
 
     @Override
     public void die(DamageSource source) {
         if (config == null || config.getGamemode() == AgentConfig.Gamemode.CREATIVE) return;
 
-        // Publish death event
         JsonObject data = new JsonObject();
         data.addProperty("cause", source.getMsgId());
         data.addProperty("gamemode", config.getGamemode().name());
@@ -145,31 +165,46 @@ public class AgentPlayer extends ServerPlayer {
             this.getGameProfile().getName(), EventType.AGENT_DIED, data));
 
         if (config.getGamemode() == AgentConfig.Gamemode.HARDCORE) {
-            // Flag for tick handler to clean up (avoid heavy I/O in death handler)
             this.hardcoreDeath = true;
         } else {
-            // SURVIVAL: respawn at bed or world spawn after 1 tick
             scheduleRespawn();
         }
     }
 
     private void scheduleRespawn() {
+        // Immediately prevent vanilla death processing
+        this.setHealth(1.0f);
+        this.dead = false;
+        this.deathTime = 0;
+
         this.server.tell(new TickTask(this.server.getTickCount() + 1, () -> {
-            // Reset health and food
+            // Full reset
             this.setHealth(this.getMaxHealth());
             this.getFoodData().setFoodLevel(20);
             this.getFoodData().setSaturation(5.0f);
             this.clearFire();
             this.removeAllEffects();
-
-            // Clear death state
             this.setDeltaMovement(0, 0, 0);
-            this.dead = false;
-            this.deathTime = 0;
+            this.setPose(net.minecraft.world.entity.Pose.STANDING);
+            this.hurtTime = 0;
 
-            // Teleport to bed or world spawn
-            if (config.hasBed()) {
-                this.teleportTo(config.getBedX() + 0.5, config.getBedY(), config.getBedZ() + 0.5);
+            // Respawn at bed SIDE (standing) or world spawn
+            if (config.hasBed() && this.level() instanceof ServerLevel level) {
+                BlockPos bedPos = new BlockPos(config.getBedX(), config.getBedY(), config.getBedZ());
+                net.minecraft.world.level.block.state.BlockState bedState = level.getBlockState(bedPos);
+                if (bedState.getBlock() instanceof net.minecraft.world.level.block.BedBlock) {
+                    net.minecraft.core.Direction facing = bedState.getValue(
+                        net.minecraft.world.level.block.BedBlock.FACING);
+                    var standUp = net.minecraft.world.level.block.BedBlock.findStandUpPosition(
+                        net.minecraft.world.entity.EntityType.PLAYER, level, bedPos, facing, this.getYRot());
+                    if (standUp.isPresent()) {
+                        var pos = standUp.get();
+                        this.teleportTo(pos.x, pos.y, pos.z);
+                        return;
+                    }
+                }
+                // Bed block gone or no valid stand position — stand on bed coords
+                this.teleportTo(bedPos.getX() + 0.5, bedPos.getY() + 1.0, bedPos.getZ() + 0.5);
             } else {
                 BlockPos spawn = this.server.overworld().getSharedSpawnPos();
                 this.teleportTo(spawn.getX() + 0.5, spawn.getY(), spawn.getZ() + 0.5);

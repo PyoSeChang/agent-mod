@@ -675,6 +675,11 @@ public class AgentHttpServer {
                     config.setGamemode(newMode);
                 }
 
+                // Survival options
+                if (body.has("takeDamage")) config.setTakeDamage(body.get("takeDamage").getAsBoolean());
+                if (body.has("hungerEnabled")) config.setHungerEnabled(body.get("hungerEnabled").getAsBoolean());
+                if (body.has("mobTargetable")) config.setMobTargetable(body.get("mobTargetable").getAsBoolean());
+
                 // Bed update
                 if (body.has("bed")) {
                     if (body.get("bed").isJsonNull()) {
@@ -692,10 +697,21 @@ public class AgentHttpServer {
 
                 config.save(agentName);
 
-                // Update in-memory config if agent is spawned
-                AgentContext ctx = AgentManager.getInstance().getAgent(agentName);
-                if (ctx != null) {
-                    ctx.setConfig(config);
+                // Update in-memory config on server thread for thread safety
+                final AgentConfig finalConfig = config;
+                MinecraftServer srv = AgentManager.getInstance().getServer();
+                if (srv != null) {
+                    srv.execute(() -> {
+                        AgentContext ctx = AgentManager.getInstance().getAgent(agentName);
+                        if (ctx != null) {
+                            ctx.setConfig(finalConfig);
+                            if (ctx.getPlayer() instanceof com.pyosechang.agent.core.AgentPlayer ap) {
+                                ap.setConfig(finalConfig);
+                                // Re-apply invulnerability flag
+                                ap.setInvulnerable(finalConfig.getGamemode() == AgentConfig.Gamemode.CREATIVE);
+                            }
+                        }
+                    });
                 }
 
                 JsonObject result = new JsonObject();

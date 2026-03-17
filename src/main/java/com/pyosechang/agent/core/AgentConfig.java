@@ -26,6 +26,11 @@ public class AgentConfig {
 
     private Gamemode gamemode = Gamemode.SURVIVAL;
 
+    // Survival options (ignored in CREATIVE)
+    private boolean takeDamage = true;
+    private boolean hungerEnabled = true;
+    private boolean mobTargetable = true;
+
     // Bed location (null = not set)
     private Integer bedX;
     private Integer bedY;
@@ -38,6 +43,17 @@ public class AgentConfig {
 
     public Gamemode getGamemode() { return gamemode; }
     public void setGamemode(Gamemode gamemode) { this.gamemode = gamemode; }
+
+    // --- Survival options ---
+
+    public boolean isTakeDamage() { return takeDamage; }
+    public void setTakeDamage(boolean takeDamage) { this.takeDamage = takeDamage; }
+
+    public boolean isHungerEnabled() { return hungerEnabled; }
+    public void setHungerEnabled(boolean hungerEnabled) { this.hungerEnabled = hungerEnabled; }
+
+    public boolean isMobTargetable() { return mobTargetable; }
+    public void setMobTargetable(boolean mobTargetable) { this.mobTargetable = mobTargetable; }
 
     // --- Bed ---
 
@@ -98,6 +114,9 @@ public class AgentConfig {
     public JsonObject toJson() {
         JsonObject obj = new JsonObject();
         obj.addProperty("gamemode", gamemode.name());
+        obj.addProperty("takeDamage", takeDamage);
+        obj.addProperty("hungerEnabled", hungerEnabled);
+        obj.addProperty("mobTargetable", mobTargetable);
         if (hasBed()) {
             JsonObject bed = new JsonObject();
             bed.addProperty("x", bedX);
@@ -116,6 +135,9 @@ public class AgentConfig {
                 config.gamemode = Gamemode.valueOf(json.get("gamemode").getAsString());
             } catch (IllegalArgumentException ignored) {}
         }
+        if (json.has("takeDamage")) config.takeDamage = json.get("takeDamage").getAsBoolean();
+        if (json.has("hungerEnabled")) config.hungerEnabled = json.get("hungerEnabled").getAsBoolean();
+        if (json.has("mobTargetable")) config.mobTargetable = json.get("mobTargetable").getAsBoolean();
         if (json.has("bed") && !json.get("bed").isJsonNull()) {
             JsonObject bed = json.getAsJsonObject("bed");
             config.setBed(

@@ -114,6 +114,15 @@ public class AgentManager {
         if (!config.hasBed()) return;
 
         BlockPos pos = new BlockPos(config.getBedX(), config.getBedY(), config.getBedZ());
+
+        // Only sleep if bed block actually exists
+        boolean bedExists = level.getBlockState(pos).getBlock()
+            instanceof net.minecraft.world.level.block.BedBlock;
+        if (!bedExists) {
+            LOGGER.warn("Bed for '{}' at {} no longer exists, skipping dormant spawn", name, pos);
+            return;
+        }
+
         AgentContext ctx = createAgentEntity(name, level, pos, config);
         ctx.setDormant(true);
         agents.put(name, ctx);
@@ -242,8 +251,14 @@ public class AgentManager {
             ServerPlayer ap = ctx.getPlayer();
             ap.teleportTo(bedPos.getX() + 0.5, bedPos.getY(), bedPos.getZ() + 0.5);
             AgentAnimation.broadcast(new net.minecraft.network.protocol.game.ClientboundTeleportEntityPacket(ap));
-            sleepInBed(ap, bedPos);
-            ctx.setDormant(true);
+            if (sleepInBed(ap, bedPos)) {
+                ctx.setDormant(true);
+            } else {
+                // Bed block gone — remove entity
+                agents.remove(name);
+                removeAgentFromClients(ap);
+                ap.discard();
+            }
         } else {
             // No bed: remove entirely
             agents.remove(name);
@@ -275,20 +290,21 @@ public class AgentManager {
      * Vanilla sleeps at the HEAD block, not the FOOT.
      * Config stores FOOT position; we calculate HEAD = FOOT + facing direction.
      */
-    private void sleepInBed(ServerPlayer agent, BlockPos footPos) {
-        if (!(agent.level() instanceof ServerLevel level)) return;
+    /**
+     * Put agent to sleep in bed. Returns false if bed block doesn't exist.
+     */
+    private boolean sleepInBed(ServerPlayer agent, BlockPos footPos) {
+        if (!(agent.level() instanceof ServerLevel level)) return false;
         net.minecraft.world.level.block.state.BlockState footState = level.getBlockState(footPos);
-        if (footState.getBlock() instanceof net.minecraft.world.level.block.BedBlock
-                && footState.hasProperty(net.minecraft.world.level.block.BedBlock.FACING)) {
-            net.minecraft.core.Direction facing = footState.getValue(
-                net.minecraft.world.level.block.BedBlock.FACING);
-            BlockPos headPos = footPos.relative(facing);
-            agent.startSleeping(headPos);
-        } else {
-            // Fallback: use footPos directly
-            agent.startSleeping(footPos);
-        }
+        if (!(footState.getBlock() instanceof net.minecraft.world.level.block.BedBlock)) return false;
+        if (!footState.hasProperty(net.minecraft.world.level.block.BedBlock.FACING)) return false;
+
+        net.minecraft.core.Direction facing = footState.getValue(
+            net.minecraft.world.level.block.BedBlock.FACING);
+        BlockPos headPos = footPos.relative(facing);
+        agent.startSleeping(headPos);
         broadcastEntityData(agent);
+        return true;
     }
 
     private void broadcastEntityData(ServerPlayer agentPlayer) {
