@@ -14,3 +14,11 @@
   - 새 도구 활용도: mine_area, use_item_on_area, execute_sequence 사용 횟수
   - 불필요 액션 수: 중복 get_observation, 수동 pickup_items, 반복 equip
 - **관련 컴포넌트**: `actions`, `brain`, `body`
+
+### 평가 관점
+
+1. **목표 달성** — 최종적으로 farmland 위에 wheat_crops가 존재하는가? 전체 워크플로우 완료?
+2. **단계 간 연결** — 1단계 결과물(호미, 경작지)이 2단계에서 정확히 활용되었는가?
+3. **도구 선택** — mine_area, use_item_on_area, execute_sequence 등 효율적 도구 활용도
+4. **행동 효율** — 불필요 액션 수 (중복 get_observation, 수동 pickup_items, 반복 equip)
+5. **실패 복구** — 복합 실패 시 전체 흐름 유지 능력. 한 단계 실패가 다음 단계에 영향 미쳤는가?
