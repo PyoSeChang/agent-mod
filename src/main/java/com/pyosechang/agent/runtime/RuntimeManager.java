@@ -46,13 +46,7 @@ public class RuntimeManager {
             return;
         }
 
-        Path gameDir = FMLPaths.GAMEDIR.get();
-        // Dev: agent-runtime is sibling to run/ dir; Deployed: inside game dir
-        Path runtimeCandidate = gameDir.resolve("agent-runtime");
-        if (!runtimeCandidate.toFile().isDirectory()) {
-            runtimeCandidate = gameDir.resolve("../agent-runtime").normalize();
-        }
-        final Path runtimePath = runtimeCandidate;
+        final Path runtimePath = resolveRuntimePath();
         String nodeCmd = resolveNodeCommand();
 
         Thread runtimeThread = new Thread(() -> {
@@ -159,6 +153,34 @@ public class RuntimeManager {
             };
         } catch (Exception ignored) {
         }
+    }
+
+    /**
+     * Resolve agent-runtime path. Search order:
+     * 1. ~/.agent-mod/agent-runtime (deployed)
+     * 2. GAMEDIR/agent-runtime (legacy / in-instance)
+     * 3. GAMEDIR/../agent-runtime (dev: sibling to run/)
+     */
+    static Path resolveRuntimePath() {
+        // 1. User home: ~/.agent-mod/agent-runtime
+        Path userHome = Path.of(System.getProperty("user.home"), ".agent-mod", "agent-runtime");
+        if (userHome.resolve("dist/index.js").toFile().isFile()) {
+            LOGGER.info("Using agent-runtime from user home: {}", userHome);
+            return userHome;
+        }
+
+        // 2. Game dir (legacy)
+        Path gameDir = FMLPaths.GAMEDIR.get();
+        Path inGame = gameDir.resolve("agent-runtime");
+        if (inGame.toFile().isDirectory()) {
+            LOGGER.info("Using agent-runtime from game dir: {}", inGame);
+            return inGame;
+        }
+
+        // 3. Dev (sibling to run/)
+        Path dev = gameDir.resolve("../agent-runtime").normalize();
+        LOGGER.info("Using agent-runtime from dev path: {}", dev);
+        return dev;
     }
 
     static String resolveNodeCommand() {
