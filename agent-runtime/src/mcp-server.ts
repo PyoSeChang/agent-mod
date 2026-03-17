@@ -119,10 +119,10 @@ server.tool("search_memory", "Search memories by keyword and/or category",
 // === Persona-filtered tools ===
 
 if (isAllowed("move_to")) {
-  server.tool("move_to", "Move agent to coordinates",
-    { x: z.number(), y: z.number(), z: z.number() },
-    async ({ x, y, z: zCoord }) => ({
-      content: [{ type: "text", text: await bridgeFetch("/action", "POST", { action: "move_to", x, y, z: zCoord }) }],
+  server.tool("move_to", "Move agent to coordinates. Use stop_distance to stop before reaching the exact target (e.g. 2-3 when approaching a player or entity).",
+    { x: z.number(), y: z.number(), z: z.number(), stop_distance: z.number().optional().default(0).describe("Stop when within this many blocks of target (default 0 = exact position). Use 2-3 for approaching players/entities.") },
+    async ({ x, y, z: zCoord, stop_distance }) => ({
+      content: [{ type: "text", text: await bridgeFetch("/action", "POST", { action: "move_to", x, y, z: zCoord, stop_distance }) }],
     })
   );
 }
@@ -153,7 +153,7 @@ if (isAllowed("mine_area")) {
 }
 
 if (isAllowed("place_block")) {
-  server.tool("place_block", "Place a block at coordinates",
+  server.tool("place_block", "Place a single block at coordinates (vanilla placement with collision check). For placing blocks across a 2D area (floors, platforms), equip the block item and use use_item_on_area instead.",
     { x: z.number(), y: z.number(), z: z.number(), block: z.string() },
     async ({ x, y, z: zCoord, block }) => ({
       content: [{ type: "text", text: await bridgeFetch("/action", "POST", { action: "place_block", x, y, z: zCoord, block }) }],
@@ -254,7 +254,7 @@ if (isAllowed("use_item_on")) {
 }
 
 if (isAllowed("use_item_on_area")) {
-  server.tool("use_item_on_area", "Use held item on every block in a 2D area (fixed Y). Agent walks in serpentine pattern. Great for hoeing farmland or planting seeds.",
+  server.tool("use_item_on_area", "Use held item on every block in a 2D area (fixed Y). Agent walks in serpentine pattern. Use for: hoeing farmland, planting seeds, placing blocks on a surface, or any repeated right-click across an area. Equip the item first.",
     {
       x1: z.number().describe("Start X"),
       z1: z.number().describe("Start Z"),

@@ -25,6 +25,8 @@ public class MoveToAction implements AsyncAction {
     private boolean active = false;
     private double lastX, lastY, lastZ;
     private int stuckTicks = 0;
+    private double stopDistance = 0;
+    private net.minecraft.world.phys.Vec3 originalTarget;
 
     @Override
     public String getName() { return "move_to"; }
@@ -38,9 +40,21 @@ public class MoveToAction implements AsyncAction {
         double x = params.get("x").getAsDouble();
         double y = params.get("y").getAsDouble();
         double z = params.get("z").getAsDouble();
+        stopDistance = params.has("stop_distance") ? params.get("stop_distance").getAsDouble() : 0;
+        originalTarget = new net.minecraft.world.phys.Vec3(x, y, z);
 
         if (!(agent.level() instanceof ServerLevel level)) {
             return failImmediately("Not in a server level");
+        }
+
+        // Already within stop_distance?
+        if (stopDistance > 0 && agent.position().distanceTo(originalTarget) <= stopDistance) {
+            JsonObject result = new JsonObject();
+            result.addProperty("ok", true);
+            result.addProperty("message", "Already within stop_distance of target");
+            result.add("position", posToJson(agent));
+            future.complete(result);
+            return future;
         }
 
         BlockPos from = agent.blockPosition();
@@ -95,6 +109,17 @@ public class MoveToAction implements AsyncAction {
 
         // Tick the path follower
         pathFollower.tick(agent);
+
+        // Early completion if within stop_distance of original target
+        if (stopDistance > 0 && agent.position().distanceTo(originalTarget) <= stopDistance) {
+            active = false;
+            pathFollower.cancel();
+            JsonObject result = new JsonObject();
+            result.addProperty("ok", true);
+            result.add("position", posToJson(agent));
+            future.complete(result);
+            return;
+        }
 
         // Check if finished
         if (pathFollower.isFinished()) {

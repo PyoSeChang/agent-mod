@@ -23,6 +23,17 @@
 - `AgentManager.sendAgentInfoToPlayer()`: 동일하게 장비 패킷 추가
 - `AgentManager.buildEquipmentPacket()`: 장비 슬롯 → 패킷 변환 유틸 메서드 추가
 
+### 테스트 결과
+
+[v0.8.2 / 2026-03-17 실행 기록](runs/v0.8.2/2026-03-17.md) 참조.
+
+### 발견 이슈
+
+- [ ] `I-001`: PlaceBlockAction이 level.setBlock() 직접 호출 — 엔티티 충돌 체크 우회, 자기 위치에 블록 설치 가능
+- [ ] `I-002`: SDK가 use_item_on_area 대신 execute_sequence + place_block 선택 (brain)
+- [ ] `I-003`: move_to에 stop_distance 개념 없음 — 목표에 밀착
+- [ ] `I-004`: 프롬프트에 human-like 행동 철학 부재
+
 ### 설계 판단
 
 - **수동 브로드캐스트 제거**: 액션 tick에서 `agent.tick()` 전에 위치를 브로드캐스트하면 클라이언트가 이전 좌표를 받아 시각적 떨림 발생. `AgentTickHandler`의 20틱 주기 브로드캐스트(`agent.tick()` 후)에 일원화.

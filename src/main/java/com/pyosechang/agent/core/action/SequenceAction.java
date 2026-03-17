@@ -21,6 +21,8 @@ public class SequenceAction implements AsyncAction {
 
     private static final Logger LOGGER = LogUtils.getLogger();
 
+    private static final int SYNC_STEP_DELAY_TICKS = 3;
+
     private CompletableFuture<JsonObject> future;
     private boolean active = false;
 
@@ -30,6 +32,9 @@ public class SequenceAction implements AsyncAction {
 
     // Current async sub-action (null if waiting for next step or running sync)
     private AsyncAction currentSubAction;
+
+    // Tick delay between sync actions for human-like pacing
+    private int delayTicksRemaining = 0;
 
     @Override
     public String getName() { return "execute_sequence"; }
@@ -78,6 +83,12 @@ public class SequenceAction implements AsyncAction {
             return;
         }
 
+        // Tick delay between sync steps
+        if (delayTicksRemaining > 0) {
+            delayTicksRemaining--;
+            return;
+        }
+
         // If we have an active async sub-action, tick it
         if (currentSubAction != null) {
             if (currentSubAction.isActive()) {
@@ -89,7 +100,7 @@ public class SequenceAction implements AsyncAction {
             // Fall through to process next step
         }
 
-        // Process next step(s)
+        // Process next step
         processNextStep(agent);
     }
 
@@ -154,16 +165,11 @@ public class SequenceAction implements AsyncAction {
                 }
 
                 currentStepIndex++;
-                // Process next sync step immediately (same tick) for efficiency
-                if (currentStepIndex < steps.size()) {
-                    JsonObject nextStep = steps.get(currentStepIndex);
-                    String nextAction = nextStep.get("action").getAsString();
-                    Action next = ActionRegistry.getInstance().get(nextAction);
-                    if (next != null && !(next instanceof AsyncAction)) {
-                        processNextStep(agent); // Recurse for sync chains
-                    }
-                } else {
+                if (currentStepIndex >= steps.size()) {
                     finishSequence(true, null);
+                } else {
+                    // Wait before next step for human-like pacing
+                    delayTicksRemaining = SYNC_STEP_DELAY_TICKS;
                 }
             } catch (Exception e) {
                 results.add(errorResult(e.getMessage()));

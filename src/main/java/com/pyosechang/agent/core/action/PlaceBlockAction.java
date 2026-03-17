@@ -1,12 +1,17 @@
 package com.pyosechang.agent.core.action;
 
 import com.google.gson.JsonObject;
+import com.pyosechang.agent.core.AgentAnimation;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.InteractionHand;
+import net.minecraft.world.InteractionResult;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.Block;
-import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.phys.BlockHitResult;
+import net.minecraft.world.phys.Vec3;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraftforge.registries.ForgeRegistries;
 
@@ -43,10 +48,25 @@ public class PlaceBlockAction implements Action {
         }
 
         double distance = agent.position().distanceTo(
-                new net.minecraft.world.phys.Vec3(x + 0.5, y + 0.5, z + 0.5));
+                new Vec3(x + 0.5, y + 0.5, z + 0.5));
         if (distance > 6.0) {
             result.addProperty("ok", false);
             result.addProperty("error", "Position too far away (distance: " + String.format("%.1f", distance) + ")");
+            return result;
+        }
+
+        // Target must be air or replaceable
+        if (!level.getBlockState(blockPos).isAir() && !level.getBlockState(blockPos).canBeReplaced()) {
+            result.addProperty("ok", false);
+            result.addProperty("error", "Target position is not empty");
+            return result;
+        }
+
+        // Find an adjacent solid block to click on
+        AdjacentFace adjacent = findAdjacentSolid(level, blockPos);
+        if (adjacent == null) {
+            result.addProperty("ok", false);
+            result.addProperty("error", "No adjacent solid block to place against");
             return result;
         }
 
@@ -70,24 +90,77 @@ public class PlaceBlockAction implements Action {
             return result;
         }
 
-        // Place block
-        BlockState blockState = block.defaultBlockState();
-        level.setBlock(blockPos, blockState, 3);
+        // Save current mainhand, temporarily equip the block item
+        int selectedSlot = agent.getInventory().selected;
+        ItemStack savedMainhand = agent.getInventory().getItem(selectedSlot).copy();
+        ItemStack placeItem = agent.getInventory().getItem(invSlot);
 
-        // Decrease item count
-        ItemStack invStack = agent.getInventory().getItem(invSlot);
-        invStack.shrink(1);
-        if (invStack.isEmpty()) {
-            agent.getInventory().setItem(invSlot, ItemStack.EMPTY);
+        if (invSlot == selectedSlot) {
+            // Already in mainhand — just use it
+        } else {
+            // Swap: put block item in mainhand slot
+            agent.getInventory().setItem(selectedSlot, placeItem);
+            agent.getInventory().setItem(invSlot, savedMainhand);
         }
 
-        result.addProperty("ok", true);
-        result.addProperty("placed_block", blockIdStr);
-        JsonObject pos = new JsonObject();
-        pos.addProperty("x", x);
-        pos.addProperty("y", y);
-        pos.addProperty("z", z);
-        result.add("position", pos);
+        // Build hit result and place via gameMode
+        AgentAnimation.lookAt(agent, x + 0.5, y + 0.5, z + 0.5);
+        AgentAnimation.swingArm(agent);
+
+        Vec3 hitLocation = Vec3.atCenterOf(adjacent.clickOn).relative(adjacent.face, 0.5);
+        BlockHitResult hitResult = new BlockHitResult(hitLocation, adjacent.face, adjacent.clickOn, false);
+        ItemStack mainHandItem = agent.getMainHandItem();
+
+        InteractionResult ir = agent.gameMode.useItemOn(
+                agent, level, mainHandItem, InteractionHand.MAIN_HAND, hitResult);
+
+        // Restore mainhand if we swapped
+        if (invSlot != selectedSlot) {
+            ItemStack afterPlace = agent.getInventory().getItem(selectedSlot).copy();
+            agent.getInventory().setItem(selectedSlot, agent.getInventory().getItem(invSlot).copy());
+            agent.getInventory().setItem(invSlot, afterPlace);
+        }
+
+        if (ir.consumesAction()) {
+            result.addProperty("ok", true);
+            result.addProperty("placed_block", blockIdStr);
+            JsonObject pos = new JsonObject();
+            pos.addProperty("x", x);
+            pos.addProperty("y", y);
+            pos.addProperty("z", z);
+            result.add("position", pos);
+        } else {
+            result.addProperty("ok", false);
+            result.addProperty("error", "Block placement failed (result: " + ir.name() + ")");
+        }
+
         return result;
+    }
+
+    private record AdjacentFace(BlockPos clickOn, Direction face) {}
+
+    /**
+     * Find an adjacent solid block to "click" on for block placement.
+     * Returns the block to click and the face to click on.
+     */
+    private AdjacentFace findAdjacentSolid(ServerLevel level, BlockPos target) {
+        // Below (most common — placing on ground)
+        BlockPos below = target.below();
+        if (level.getBlockState(below).isSolid()) {
+            return new AdjacentFace(below, Direction.UP);
+        }
+        // Horizontal neighbors
+        for (Direction dir : new Direction[]{Direction.NORTH, Direction.SOUTH, Direction.EAST, Direction.WEST}) {
+            BlockPos adj = target.relative(dir);
+            if (level.getBlockState(adj).isSolid()) {
+                return new AdjacentFace(adj, dir.getOpposite());
+            }
+        }
+        // Above
+        BlockPos above = target.above();
+        if (level.getBlockState(above).isSolid()) {
+            return new AdjacentFace(above, Direction.DOWN);
+        }
+        return null;
     }
 }
