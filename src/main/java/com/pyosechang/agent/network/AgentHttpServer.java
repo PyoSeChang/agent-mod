@@ -92,6 +92,9 @@ public class AgentHttpServer {
             httpServer.createContext("/manager/events", this::handleManagerEvents);
             httpServer.createContext("/manager/tell", this::handleManagerTell);
 
+            // Server command endpoint
+            httpServer.createContext("/command", this::handleCommand);
+
             // Event/TUI endpoints
             httpServer.createContext("/events/stream", this::handleSSEStream);
             httpServer.createContext("/events/history", this::handleEventsHistory);
@@ -1409,6 +1412,45 @@ public class AgentHttpServer {
             result.addProperty("ok", true);
             result.add("events", arr);
             sendJson(exchange, 200, result);
+        } catch (Exception e) {
+            sendError(exchange, 500, e.getMessage());
+        }
+    }
+
+    /**
+     * POST /command — execute a server command (e.g. /give, /time, /tp).
+     * Body: {"command": "give [test-agent] dirt 64"}
+     * Leading slash is optional.
+     */
+    private void handleCommand(HttpExchange exchange) throws IOException {
+        if (!assertMethod(exchange, "POST")) return;
+        try {
+            JsonObject body = readBody(exchange);
+            String command = body.get("command").getAsString();
+            if (command.startsWith("/")) command = command.substring(1);
+
+            MinecraftServer server = AgentManager.getInstance().getServer();
+            if (server == null) {
+                sendError(exchange, 500, "Server not available");
+                return;
+            }
+
+            String cmd = command;
+            CompletableFuture<JsonObject> future = new CompletableFuture<>();
+            server.execute(() -> {
+                try {
+                    int result = server.getCommands().performPrefixedCommand(
+                        server.createCommandSourceStack(), cmd);
+                    JsonObject res = new JsonObject();
+                    res.addProperty("ok", result > 0);
+                    res.addProperty("result", result);
+                    res.addProperty("command", cmd);
+                    future.complete(res);
+                } catch (Exception e) {
+                    future.complete(errorJson(e.getMessage()));
+                }
+            });
+            sendJson(exchange, 200, future.get(5, TimeUnit.SECONDS));
         } catch (Exception e) {
             sendError(exchange, 500, e.getMessage());
         }
