@@ -168,6 +168,12 @@ public class AgentHttpServer {
             return;
         }
 
+        // Give item to agent inventory
+        if ("/give".equals(subpath)) {
+            handleGiveItem(exchange, agentName);
+            return;
+        }
+
         // Give bed item to player
         if ("/give-bed".equals(subpath)) {
             handleGiveBed(exchange, agentName);
@@ -727,6 +733,49 @@ public class AgentHttpServer {
             }
         } else {
             sendError(exchange, 405, "Method not allowed. Use GET or POST.");
+        }
+    }
+
+    /**
+     * POST /agent/{name}/give — add item to agent inventory.
+     * Body: {"item": "minecraft:dirt", "count": 64}
+     */
+    private void handleGiveItem(HttpExchange exchange, String agentName) throws IOException {
+        if (!assertMethod(exchange, "POST")) return;
+        try {
+            JsonObject body = readBody(exchange);
+            String itemId = body.get("item").getAsString();
+            int count = body.has("count") ? body.get("count").getAsInt() : 1;
+
+            AgentContext ctx = AgentManager.getInstance().getAgent(agentName);
+            if (ctx == null) {
+                sendError(exchange, 404, "Agent not found: " + agentName);
+                return;
+            }
+
+            net.minecraft.resources.ResourceLocation rl = new net.minecraft.resources.ResourceLocation(itemId);
+            net.minecraft.world.item.Item item = net.minecraftforge.registries.ForgeRegistries.ITEMS.getValue(rl);
+            if (item == null || item == net.minecraft.world.item.Items.AIR) {
+                sendError(exchange, 400, "Unknown item: " + itemId);
+                return;
+            }
+
+            MinecraftServer server = AgentManager.getInstance().getServer();
+            CompletableFuture<JsonObject> future = new CompletableFuture<>();
+            int finalCount = count;
+            server.execute(() -> {
+                net.minecraft.world.item.ItemStack stack = new net.minecraft.world.item.ItemStack(item, finalCount);
+                boolean added = ctx.getPlayer().getInventory().add(stack);
+                JsonObject result = new JsonObject();
+                result.addProperty("ok", added);
+                result.addProperty("item", itemId);
+                result.addProperty("count", finalCount);
+                if (!added) result.addProperty("error", "Inventory full");
+                future.complete(result);
+            });
+            sendJson(exchange, 200, future.get(5, TimeUnit.SECONDS));
+        } catch (Exception e) {
+            sendError(exchange, 500, e.getMessage());
         }
     }
 
