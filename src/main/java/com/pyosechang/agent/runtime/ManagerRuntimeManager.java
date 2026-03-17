@@ -11,7 +11,7 @@ import com.pyosechang.agent.event.EventType;
 import com.pyosechang.agent.network.AgentHttpServer;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.network.chat.Component;
-import net.minecraftforge.fml.loading.FMLPaths;
+
 import org.slf4j.Logger;
 
 import java.io.BufferedReader;
@@ -57,12 +57,7 @@ public class ManagerRuntimeManager {
             return;
         }
 
-        Path gameDir = FMLPaths.GAMEDIR.get();
-        Path runtimeCandidate = gameDir.resolve("agent-runtime");
-        if (!runtimeCandidate.toFile().isDirectory()) {
-            runtimeCandidate = gameDir.resolve("../agent-runtime").normalize();
-        }
-        final Path runtimePath = runtimeCandidate;
+        final Path runtimePath = RuntimeManager.resolveRuntimePath();
         String nodeCmd = RuntimeManager.resolveNodeCommand();
 
         Thread runtimeThread = new Thread(() -> {

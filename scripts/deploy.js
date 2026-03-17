@@ -8,6 +8,7 @@ const PROJECT_DIR = path.resolve(__dirname, '..');
 const MOD_JAR_DIR = path.join(PROJECT_DIR, 'build', 'libs');
 const RUNTIME_DIR = path.join(PROJECT_DIR, 'agent-runtime');
 const TUI_EXE = path.join(PROJECT_DIR, 'agent-tui', 'agent-tui.exe');
+const USER_RUNTIME_DIR = path.join(process.env.USERPROFILE, '.agent-mod', 'agent-runtime');
 
 const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
 function ask(q) { return new Promise(r => rl.question(q, r)); }
@@ -85,10 +86,21 @@ async function main() {
   }
   console.log('  OK');
 
-  // 5. 복사
-  console.log('[4/4] 복사...');
+  // 5. agent-runtime → ~/.agent-mod/agent-runtime (shared across instances)
+  console.log('[4/5] agent-runtime → ~/.agent-mod/ ...');
+  // Clean old instance-local runtime if exists
+  const oldRtTarget = path.join(target, 'agent-runtime');
+  if (fs.existsSync(oldRtTarget)) {
+    fs.rmSync(oldRtTarget, { recursive: true, force: true });
+    console.log(`  삭제: (인스턴스 내 레거시) agent-runtime/`);
+  }
+  copyDirSync(path.join(RUNTIME_DIR, 'dist'), path.join(USER_RUNTIME_DIR, 'dist'));
+  copyDirSync(path.join(RUNTIME_DIR, 'node_modules'), path.join(USER_RUNTIME_DIR, 'node_modules'));
+  fs.copyFileSync(path.join(RUNTIME_DIR, 'package.json'), path.join(USER_RUNTIME_DIR, 'package.json'));
+  console.log(`  -> ${USER_RUNTIME_DIR}`);
 
-  // 기존 agent JAR 삭제
+  // 6. JAR + TUI → 인스턴스
+  console.log('[5/5] JAR + TUI → 인스턴스...');
   const modsDir = path.join(target, 'mods');
   for (const f of fs.readdirSync(modsDir)) {
     if (f.startsWith('agent-') && f.endsWith('.jar')) {
@@ -99,16 +111,13 @@ async function main() {
   fs.copyFileSync(path.join(MOD_JAR_DIR, jar), path.join(modsDir, jar));
   console.log(`  -> mods/${jar}`);
 
-  const rtTarget = path.join(target, 'agent-runtime');
-  copyDirSync(path.join(RUNTIME_DIR, 'dist'), path.join(rtTarget, 'dist'));
-  copyDirSync(path.join(RUNTIME_DIR, 'node_modules'), path.join(rtTarget, 'node_modules'));
-  fs.copyFileSync(path.join(RUNTIME_DIR, 'package.json'), path.join(rtTarget, 'package.json'));
-  console.log('  -> agent-runtime/');
-
   fs.copyFileSync(TUI_EXE, path.join(target, 'agent-tui.exe'));
   console.log('  -> agent-tui.exe');
 
   console.log('\n=== 배포 완료 ===\n');
+  console.log(`  agent-runtime: ${USER_RUNTIME_DIR}`);
+  console.log(`  mod JAR:       ${target}\\mods\\${jar}`);
+  console.log(`  TUI:           ${target}\\agent-tui.exe\n`);
   console.log(`  1. CurseForge에서 ${targetName} 실행`);
   console.log('  2. 월드 진입');
   console.log(`  3. 별도 터미널: cd "${target}" && .\\agent-tui.exe\n`);
