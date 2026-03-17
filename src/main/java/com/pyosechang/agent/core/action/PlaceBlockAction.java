@@ -62,6 +62,15 @@ public class PlaceBlockAction implements Action {
             return result;
         }
 
+        // Check if agent is standing where the block would be placed
+        BlockPos agentFeet = agent.blockPosition();
+        BlockPos agentHead = agentFeet.above();
+        if (blockPos.equals(agentFeet) || blockPos.equals(agentHead)) {
+            result.addProperty("ok", false);
+            result.addProperty("error", "Cannot place block at your own position — move away first");
+            return result;
+        }
+
         // Find an adjacent solid block to click on
         AdjacentFace adjacent = findAdjacentSolid(level, blockPos);
         if (adjacent == null) {

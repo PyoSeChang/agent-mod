@@ -266,21 +266,63 @@ public class UseItemOnAreaAction implements AsyncAction {
         future.complete(result);
     }
 
+    /**
+     * Find a position to stand near the target without overlapping the block placement result.
+     * For face=UP: block is placed at target.above(), so don't stand there.
+     * Prefers positions behind the serpentine direction (already completed area).
+     */
     private BlockPos findStandingNear(ServerLevel level, BlockPos target) {
-        // The agent should stand near the target — try above first (for ground-level use)
-        BlockPos above = target.above();
-        if (level.getBlockState(above).isAir() && level.getBlockState(above.above()).isAir()) {
-            return above;
-        }
-        // Try adjacent positions
-        for (BlockPos adj : new BlockPos[]{target.north(), target.south(), target.east(), target.west()}) {
-            if (level.getBlockState(adj).isAir()
-                && level.getBlockState(adj.above()).isAir()
-                && !level.getBlockState(adj.below()).isAir()) {
+        // Calculate where the block will actually be placed based on face direction
+        BlockPos placementPos = target.relative(face);
+
+        // Try adjacent positions at the placement Y level (same height as placed block)
+        // Prefer positions outside the build area or behind serpentine progress
+        BlockPos[] candidates = new BlockPos[]{
+            placementPos.north(), placementPos.south(),
+            placementPos.east(), placementPos.west()
+        };
+
+        // First pass: adjacent positions that are walkable and NOT in the positions list
+        for (BlockPos adj : candidates) {
+            if (adj.equals(placementPos)) continue;
+            if (isWalkable(level, adj) && !isInBuildArea(adj)) {
                 return adj;
             }
         }
+
+        // Second pass: any adjacent walkable position (even if in build area)
+        for (BlockPos adj : candidates) {
+            if (adj.equals(placementPos)) continue;
+            if (isWalkable(level, adj)) {
+                return adj;
+            }
+        }
+
+        // Fallback: try one block further out in each direction
+        for (Direction dir : new Direction[]{Direction.NORTH, Direction.SOUTH, Direction.EAST, Direction.WEST}) {
+            BlockPos far = placementPos.relative(dir, 2);
+            if (isWalkable(level, far)) {
+                return far;
+            }
+        }
+
         return null;
+    }
+
+    private boolean isWalkable(ServerLevel level, BlockPos feetPos) {
+        return level.getBlockState(feetPos).isAir()
+            && level.getBlockState(feetPos.above()).isAir()
+            && level.getBlockState(feetPos.below()).isSolid();
+    }
+
+    private boolean isInBuildArea(BlockPos pos) {
+        if (positions == null) return false;
+        // Check if this position matches any target's placement result
+        for (BlockPos target : positions) {
+            BlockPos placed = target.relative(face);
+            if (placed.equals(pos)) return true;
+        }
+        return false;
     }
 
     @Override
