@@ -2,7 +2,7 @@
 
 ## v0.8.0 — 2026-03-17 `[multi-agent, body, memory, event, infra]`
 
-에이전트별 Config 시스템 추가. 게임모드(서바이벌/크리에이티브/하드코어), 침대 스폰을 G키 CONFIG 탭에서 설정. 하드코어 사망 시 에이전트+전용 메모리 영구 삭제. Despawn 시 침대 눕기, Spawn 시 침대에서 일어나기 애니메이션.
+에이전트별 Config 시스템 + Dormant(수면) 라이프사이클. 게임모드(서바이벌/크리에이티브/하드코어)와 침대 스폰을 G키 CONFIG 탭에서 설정. 침대 설치 → 에이전트 자동 눕기, Spawn = 침대에서 일어남, Despawn = 침대에 자러감. 서버 시작 시 bed 에이전트 자동 dormant. 하드코어 사망 시 영구 삭제.
 
 ### 변경 사항
 
@@ -11,59 +11,67 @@
   - Gamemode enum: SURVIVAL, CREATIVE, HARDCORE
   - Bed 위치: x, y, z, dimension (null = 미설정)
   - toJson/fromJson: HTTP 전송용 JSON 변환
-- `AgentContext`: AgentConfig 필드 추가, 생성자에서 자동 로드
+- `AgentContext`: config 필드 + `dormant` 플래그 추가
+  - dormant = entity 월드에 존재(침대에서 수면), 틱 중지, 런타임 없음
+- `AgentBedHandler.java` 신규: 침대 아이템 지급/설치 감지/중복 방지
+  - `giveBedItem()`: 기존 인벤토리 agent bed 제거 → 기존 설치 침대 파괴(HEAD/FOOT 양쪽, 아이템 드롭 없음) → dormant entity 제거 → 새 아이템 지급
+  - `onBlockPlace()`: EntityPlaceEvent 구독, FOOT 파트만 처리, 기존 다른 위치 침대 자동 파괴, config 저장, dormant entity 자동 생성
 - `AgentManagementScreen`: CONFIG 탭 추가 (세 번째 탭, 키보드 3)
   - 게임모드 라디오 버튼: Survival(초록), Creative(금색), Hardcore(빨강)
-  - 침대 위치: Set Bed(플레이어 현재 위치)/Reset Bed 버튼
-  - Creative/Hardcore 경고 텍스트 표시
-  - Apply 버튼 → /agent/{name}/config POST
-- 탭 바: [Management] [Monitor] [Config] 3탭 구조
+  - 침대: 좌표 + Give Bed/Reset 버튼 같은 행 배치
+  - Agent list에서 role 제거 → 게임모드 뱃지(S/C/H) 표시
+  - dormant 에이전트 = spawned 아닌 것으로 표시
+- 스폰 로직 중앙화: GUI/Monitor/커맨드/HTTP 모두 `AgentManager.spawn(name, level)` 단일 호출, 좌표 결정은 AgentManager 내부(bed → player → world spawn)
 
 **`body`**
 - `AgentPlayer`: 게임모드 연동
   - `isInvulnerableTo()`: CREATIVE만 무적 (기존 무조건 true → 동적)
   - `die()`: SURVIVAL=리스폰, HARDCORE=영구삭제 플래그, CREATIVE=무시
+  - `isSleeping()`: `getSleepingPos()` 있으면 true (dormant 수면 인식 + 기존 투표 로직)
   - `tick()`: CREATIVE 시 foodData.tick() 스킵
-  - `scheduleRespawn()`: 1틱 지연 후 체력/배고픔 리셋 → 침대 or 월드 스폰 텔레포트
-- `AgentManager.spawn()`: config.gamemode 기반 GameType/invulnerable 설정
-  - CREATIVE: abilities.mayfly=true, GameType.CREATIVE
-  - 침대 스폰: 명시적 좌표 없으면 침대 좌표 사용 + SLEEPING 포즈 → 1틱 후 STANDING
-- `AgentManager.despawn()`: 침대 있으면 텔레포트 + SLEEPING 포즈 → 1틱 후 entity 제거
-- `AgentTickHandler`: 하드코어 사망 감지 → RuntimeManager.stop + despawn + 디렉토리 삭제
+- `AgentManager`: dormant 라이프사이클
+  - `spawn()`: dormant 에이전트면 `wakeUp()` (침대 옆에서 일어남), 아니면 새 entity 생성
+  - `spawnDormant()`: bed 위치에 sleeping entity 생성 (서버 시작 시 호출)
+  - `sleepInBed()`: 바닐라 `startSleeping(headPos)` 사용 — FOOT에서 HEAD 좌표 계산, Y+0.6875
+  - `wakeUp()`: `BedBlock.findStandUpPosition()` 으로 침대 옆 유효 위치 계산, BedBlock.OCCUPIED=false
+  - `despawn()`: bed 있으면 dormant 전환(entity 유지, 침대 눕기), 없으면 entity 제거
+- `AgentTickHandler`: dormant 에이전트 틱 스킵, 하드코어 사망 처리
+- `AgentMod.onServerStarting()`: bed 있는 에이전트 자동 dormant 생성
 
 **`memory`**
-- `MemoryManager.deleteAgentMemories(agentName)`: visibleTo에 해당 에이전트만 있는 엔트리 일괄 삭제 (하드코어 사망 시 호출)
+- `MemoryManager.deleteAgentMemories(agentName)`: visibleTo에 해당 에이전트만 있는 엔트리 일괄 삭제
 
 **`event`**
 - `EventType`: AGENT_DIED, AGENT_DELETED 추가 (17→19)
 
 **`infra`**
-- `AgentHttpServer`: `/agent/{name}/config` GET/POST 엔드포인트
-  - GET: 현재 config 반환
-  - POST: gamemode/bed 부분 업데이트, CREATIVE 제한 검증 (요청자 플레이어 GameType 확인)
-- `/agents/list` 응답에 gamemode, has_bed 필드 추가
-- i18n: en_us.json, ko_kr.json에 config 관련 14개 키 추가
-- agent-runtime 배포 경로를 `~/.agent-mod/agent-runtime/`으로 변경 (인스턴스별 복사 → 사용자 폴더 공유)
-  - `RuntimeManager.resolveRuntimePath()`: dev/prod 환경 분리 (`FMLLoader.isProduction()`)
-    - prod: `~/.agent-mod/agent-runtime` 전용, 없으면 deploy 안내 에러
-    - dev: `GAMEDIR/../agent-runtime` 전용, 없으면 빌드 안내 에러
-  - `ManagerRuntimeManager`: 경로 해석을 `RuntimeManager.resolveRuntimePath()`로 통합 (중복 제거)
-  - `deploy.js`: runtime을 `%USERPROFILE%/.agent-mod/agent-runtime/`에 배포, 인스턴스 내 레거시 폴더 자동 삭제
+- `AgentHttpServer`:
+  - `/agent/{name}/config` GET/POST (gamemode/bed 설정, CREATIVE 제한 검증)
+  - `/agent/{name}/give-bed` POST (침대 아이템 지급)
+  - `/agents/list` 응답에 gamemode, has_bed, dormant 필드 추가
+  - spawn 엔드포인트: 좌표 불필요, AgentManager.spawn() 단일 호출
+- agent-runtime 배포 경로를 `~/.agent-mod/agent-runtime/`으로 변경
+  - `RuntimeManager.resolveRuntimePath()`: dev/prod 환경 분리
   - `RuntimeManagerTest`: dev/prod 경로 해석 7개 TC 추가
+- i18n: config 관련 16개 키 추가 (give_bed, bed_given, bed_removed 등)
+- `AgentConfigTest`: 18개 단위 테스트 (defaults, gamemode, bed, JSON round-trip)
 
 ### 설계 판단
 
-- **Config ↔ Persona 분리**: PersonaConfig(PERSONA.md)는 AI 행동(역할/성격/도구), AgentConfig(config.json)는 게임 메카닉(모드/침대). 관심사 분리로 독립 편집 가능.
-- **침대 = 좌표 설정**: 커스텀 블록/아이템 등록 없이 CONFIG 탭 Set Bed 버튼으로 플레이어 현재 좌표 저장. Forge 아이템 등록 복잡도 회피.
-- **하드코어 사망 → 틱 핸들러 처리**: die()에서 플래그만 설정, AgentTickHandler에서 파일 I/O(메모리 삭제, 디렉토리 삭제) 수행. 사망 이벤트 핸들러 내 heavy 작업 방지.
-- **Despawn 수면 연출**: 1틱 딜레이로 클라이언트가 SLEEPING 포즈를 렌더링한 후 entity 제거. 즉시 제거 시 애니메이션 안 보임.
-- **스킨 → 다음 버전**: GameProfile 텍스처 주입에 Mojang 서명 우회(클라이언트 사이드) 필요. 별도 feature branch에서 진행.
+- **Config ↔ Persona 분리**: PersonaConfig(PERSONA.md)는 AI 행동, AgentConfig(config.json)는 게임 메카닉. 독립 편집 가능.
+- **Dormant 라이프사이클**: Despawn ≠ entity 제거. bed 있는 에이전트는 dormant(수면 entity 유지). 플레이어가 항상 자고 있는 에이전트를 볼 수 있음. 서버 재시작 후에도 자동 복원.
+- **침대 = NBT 아이템 + Forge 이벤트**: 바닐라 빨간 침대에 `AgentBed` NBT 태그. 커스텀 블록/아이템 등록 없이 설치 감지(EntityPlaceEvent). BedBlock 상속 복잡도 회피.
+- **바닐라 수면 시스템 활용**: `startSleeping(headPos)` 직접 호출로 정확한 침대 위 포지셔닝(Y+0.6875). `findStandUpPosition()` 으로 침대 옆 일어나기. 커스텀 렌더링 불필요.
+- **중복 침대 방지**: Give 시 인벤토리 스캔+기존 블록 파괴(removeBlock, 아이템 드롭 없음, HEAD/FOOT 양쪽), 설치 시 기존 다른 위치 자동 파괴.
+- **스폰 로직 중앙화**: bed/player/world 좌표 결정을 AgentManager.spawn() 한 곳에 집중. GUI/커맨드/HTTP는 좌표 없이 호출.
+- **스킨 → 다음 버전**: GameProfile 텍스처 주입에 Mojang 서명 우회 필요. 별도 feature branch.
 
 ### 파일 변경 요약
 
 | 파일 | 구분 | 컴포넌트 |
 |------|------|----------|
 | `core/AgentConfig.java` | 신규 | multi-agent |
+| `core/AgentBedHandler.java` | 신규 | multi-agent |
 | `core/AgentContext.java` | 수정 | multi-agent |
 | `core/AgentPlayer.java` | 수정 | body |
 | `core/AgentManager.java` | 수정 | body |
@@ -72,8 +80,13 @@
 | `event/EventType.java` | 수정 | event |
 | `network/AgentHttpServer.java` | 수정 | infra |
 | `client/AgentManagementScreen.java` | 수정 | multi-agent |
+| `command/AgentCommand.java` | 수정 | multi-agent |
+| `AgentMod.java` | 수정 | infra |
+| `runtime/RuntimeManager.java` | 수정 | infra |
 | `lang/en_us.json` | 수정 | infra |
 | `lang/ko_kr.json` | 수정 | infra |
+| `AgentConfigTest.java` | 신규 | multi-agent |
+| `RuntimeManagerTest.java` | 신규 | infra |
 | `EventTypeTest.java` | 수정 | event |
 
 ---
