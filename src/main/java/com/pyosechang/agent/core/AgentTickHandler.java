@@ -1,7 +1,12 @@
 package com.pyosechang.agent.core;
 
 import com.pyosechang.agent.AgentMod;
+import com.pyosechang.agent.core.memory.MemoryManager;
 import com.pyosechang.agent.core.schedule.ScheduleManager;
+import com.pyosechang.agent.event.AgentEvent;
+import com.pyosechang.agent.event.EventBus;
+import com.pyosechang.agent.event.EventType;
+import com.pyosechang.agent.runtime.RuntimeManager;
 import net.minecraft.network.protocol.game.ClientboundTeleportEntityPacket;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
@@ -13,11 +18,21 @@ import net.minecraftforge.event.TickEvent;
 import net.minecraftforge.event.entity.player.PlayerEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod;
+import net.minecraftforge.fml.loading.FMLPaths;
+import com.mojang.logging.LogUtils;
+import org.slf4j.Logger;
 
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 
 @Mod.EventBusSubscriber(modid = AgentMod.MOD_ID)
 public class AgentTickHandler {
+
+    private static final Logger LOGGER = LogUtils.getLogger();
 
     @SubscribeEvent
     public static void onServerTick(TickEvent.ServerTickEvent event) {
@@ -36,8 +51,18 @@ public class AgentTickHandler {
         AgentManager manager = AgentManager.getInstance();
         if (manager.getAgentCount() == 0) return;
 
+        // Collect hardcore deaths first (can't modify collection while iterating)
+        List<String> hardcoreDeaths = null;
+
         for (AgentContext ctx : manager.getAllAgents()) {
             ServerPlayer agent = ctx.getPlayer();
+
+            // Check for hardcore death flag
+            if (agent instanceof AgentPlayer ap && ap.isHardcoreDeath()) {
+                if (hardcoreDeaths == null) hardcoreDeaths = new ArrayList<>();
+                hardcoreDeaths.add(ctx.getName());
+                continue; // Don't tick dead agents
+            }
 
             // 1) Tick actions first — PathFollower sets deltaMovement for this tick
             ctx.getActionManager().tick(agent);
@@ -53,8 +78,14 @@ public class AgentTickHandler {
             }
 
             // Auto-pickup nearby items (2-block radius)
-            // Kept for Phase 1; Phase 2 will verify if ServerPlayer handles this natively
             pickupNearbyItems(agent);
+        }
+
+        // Process hardcore deaths outside the iteration
+        if (hardcoreDeaths != null) {
+            for (String name : hardcoreDeaths) {
+                handleHardcoreDeath(name);
+            }
         }
     }
 
@@ -71,6 +102,39 @@ public class AgentTickHandler {
                 itemEntity.discard();
             }
         }
+    }
+
+    /**
+     * Hardcore death: stop runtime, despawn, delete agent directory + scoped memories.
+     */
+    private static void handleHardcoreDeath(String name) {
+        LOGGER.warn("Hardcore death for agent '{}' — permanently deleting", name);
+
+        // 1. Stop runtime
+        RuntimeManager.getInstance().stop(name);
+
+        // 2. Despawn (removes from world + clients)
+        AgentManager.getInstance().despawn(name);
+
+        // 3. Delete agent-scoped memories
+        MemoryManager.getInstance().deleteAgentMemories(name);
+
+        // 4. Delete agent directory (persona, config, inventory)
+        Path agentDir = FMLPaths.GAMEDIR.get().resolve(".agent/agents/" + name);
+        if (Files.isDirectory(agentDir)) {
+            try (var walk = Files.walk(agentDir)) {
+                walk.sorted(Comparator.reverseOrder())
+                    .forEach(p -> {
+                        try { Files.deleteIfExists(p); }
+                        catch (IOException e) { LOGGER.warn("Failed to delete {}", p); }
+                    });
+            } catch (IOException e) {
+                LOGGER.error("Failed to delete agent directory for '{}'", name, e);
+            }
+        }
+
+        // 5. Publish deletion event
+        EventBus.getInstance().publish(AgentEvent.of(name, EventType.AGENT_DELETED));
     }
 
     /**

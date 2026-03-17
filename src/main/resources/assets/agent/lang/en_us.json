@@ -109,5 +109,19 @@
   "tool.agent.use_item_on": "Use Item",
   "tool.agent.use_item_on.desc": "Right-click a block face — hoe dirt, plant seeds, flip levers, etc.",
   "tool.agent.use_item_on_area": "Use Item on Area",
-  "tool.agent.use_item_on_area.desc": "Right-click every block in a 2D area — great for hoeing or planting"
+  "tool.agent.use_item_on_area.desc": "Right-click every block in a 2D area — great for hoeing or planting",
+
+  "gui.agent.config.select_agent": "Select an agent to configure",
+  "gui.agent.config.gamemode": "Gamemode",
+  "gui.agent.config.gamemode.survival": "Survival",
+  "gui.agent.config.gamemode.creative": "Creative",
+  "gui.agent.config.gamemode.hardcore": "Hardcore",
+  "gui.agent.config.creative_warning": "Requires player to be in creative mode",
+  "gui.agent.config.hardcore_warning": "Death = permanent agent deletion!",
+  "gui.agent.config.bed": "Bed Location",
+  "gui.agent.config.bed_none": "Not set",
+  "gui.agent.config.set_bed": "Set Bed",
+  "gui.agent.config.reset_bed": "Reset",
+  "gui.agent.config.apply": "Apply",
+  "gui.agent.config.saved": "Config saved!"
 }

@@ -17,6 +17,7 @@ public class AgentContext {
     private final InterventionQueue interventionQueue;
 
     private final PersonaConfig persona;
+    private AgentConfig config;
 
     // Runtime process state
     private String sessionId;
@@ -28,6 +29,7 @@ public class AgentContext {
         this.name = name;
         this.player = player;
         this.persona = persona;
+        this.config = AgentConfig.load(name);
         this.actionManager = new ActiveActionManager(name);
         this.interventionQueue = new InterventionQueue();
         this.sessionId = UUID.randomUUID().toString();
@@ -41,6 +43,8 @@ public class AgentContext {
     public ActiveActionManager getActionManager() { return actionManager; }
     public InterventionQueue getInterventionQueue() { return interventionQueue; }
     public PersonaConfig getPersona() { return persona; }
+    public AgentConfig getConfig() { return config; }
+    public void setConfig(AgentConfig config) { this.config = config; }
 
     public String getSessionId() { return sessionId; }
     public boolean hasLaunched() { return hasLaunched; }

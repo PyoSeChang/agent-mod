@@ -9,8 +9,8 @@ class EventTypeTest {
     @Test
     void enumHasExpectedCount() {
         EventType[] values = EventType.values();
-        assertEquals(17, values.length,
-                "EventType should have 17 constants (6 runtime + 6 lifecycle + 2 schedule + 3 action)");
+        assertEquals(19, values.length,
+                "EventType should have 19 constants (6 runtime + 8 lifecycle + 2 schedule + 3 action)");
     }
 
     @Test
