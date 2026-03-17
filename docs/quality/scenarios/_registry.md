@@ -8,6 +8,9 @@
 | S-F001 | 밭 일구기 (나무→호미→경작) | farming | integration | active | 2026-03-11 |
 | S-F002 | 씨앗 심기 (상자→심기) | farming | integration | active | 2026-03-11 |
 | S-X001 | 농사 전체 (채벌→호미→경작→심기) | composite | e2e | active | 2026-03-11 |
+| S-B001 | 평탄화 — 흙 바닥 채우기 | building | integration | active | 2026-03-17 |
+| S-B002 | 벽 쌓기 — 수직 블록 배치 | building | integration | active | 2026-03-17 |
+| S-B003 | 플레이어 접근 — 사회적 거리 | building | unit | active | 2026-03-17 |
 
 ### 난이도 정의
 
